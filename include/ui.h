@@ -6,4 +6,4 @@
 // Parse and dispatch one CLI command line.
 void ui_process_command(char *input, AppConfig *config, int udp_fd);
 
-#endif 
+#endif
