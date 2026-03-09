@@ -50,11 +50,6 @@ int main(int argc, char *const *argv)
   const char *reg_ip = (argc >= 4) ? argv[3] : DEFAULT_RIP;
   const char *reg_udp_port = (argc == 5) ? argv[4] : "59000";
 
-  printf("ip: %s\n", ip);
-  printf("tcp_port: %s\n", tcp_port);
-  printf("reg_ip: %s\n", reg_ip);
-  printf("reg_udp_port: %s\n", reg_udp_port);
-
   strncpy(config.IP, argv[1], sizeof(config.IP) - 1);
   config.IP[sizeof(config.IP) - 1] = '\0';
   strncpy(config.TCP, argv[2], sizeof(config.TCP) - 1);
