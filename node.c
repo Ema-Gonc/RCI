@@ -68,13 +68,15 @@ char* get_next_hop(Node *n,char *dest){
 
 void print_routes(Node *n){
 
-    printf("Routing table\n");
+    printf("Routing table:\n");
 
-    for(int i=0;i<n->route_count;i++){
-
-        printf("%s -> %s cost=%d\n",
-        n->routes[i].dest,
-        n->routes[i].next,
-        n->routes[i].cost);
+    for(int i=0; i < n->route_count; i++){
+        // Formato que inclui Destino, Próximo Salto, Custo e Estado
+        printf("Dest: %s | Next: %s | Cost: %d | State: %s (%d)\n",
+            n->routes[i].dest,
+            n->routes[i].next,
+            n->routes[i].cost,
+            (n->routes[i].state == 0) ? "EXPEDITION" : "COORDINATION",
+            n->routes[i].state);
     }
 }
