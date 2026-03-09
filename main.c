@@ -13,20 +13,20 @@
 #include "net.h"
 
 
-// Função auxiliar para o comando Leave (usada no 'l' e no 'x') [cite: 142, 189]
+// Função auxiliar para o comando Leave (usada no 'l' e no 'x') 
 void perform_leave(Node *node, char *regIP, int regUDP) {
     if (node->net == 0) return; // Não está numa rede
 
     char msg[128], res[1024];
     int tid = rand() % 1000;
-    // REG tid 3 net id (Solicita remoção do registo) [cite: 189]
+    // REG tid 3 net id (Solicita remoção do registo) 
     sprintf(msg, "REG %03d 3 %03d %s\n", tid, node->net, node->id);
     
     if (udp_comm(regIP, regUDP, msg, res) > 0) {
         printf("Server response: %s", res);
     }
 
-    // Fecha todas as ligações TCP com vizinhos [cite: 142]
+    // Fecha todas as ligações TCP com vizinhos 
     for (int i = 0; i < node->neighbor_count; i++) {
         if (node->neighbors[i].socket > 0) {
             close(node->neighbors[i].socket);
@@ -39,14 +39,14 @@ void perform_leave(Node *node, char *regIP, int regUDP) {
     printf("Left network successfully.\n");
 }
 
-// Função para identificar o nó após a criação de uma aresta [cite: 192, 196]
+// Função para identificar o nó após a criação de uma aresta 
 void send_neighbor_hello(int sock, char *my_id) {
     char hello[64];
     sprintf(hello, "NEIGHBOR %s\n", my_id);
     send_msg(sock, hello);
 }
 
-// Encaminha mensagens de chat pelo caminho mais curto [cite: 17, 204]
+// Encaminha mensagens de chat pelo caminho mais curto 
 void forward_chat(Node *node, char *origin, char *dest, char *msg) {
     char *next = get_next_hop(node, dest);
     if (next == NULL) {
@@ -65,7 +65,7 @@ void forward_chat(Node *node, char *origin, char *dest, char *msg) {
 }
 
 int main(int argc, char *argv[]) {
-    // Invocação: OWR IP TCP [regIP regUDP] [cite: 125]
+    // Invocação: OWR IP TCP [regIP regUDP] 
     if (argc < 3) {
         printf("usage: %s IP TCP [regIP regUDP]\n", argv[0]);
         return 0;
@@ -103,7 +103,7 @@ int main(int argc, char *argv[]) {
             char cmd[256];
             if (fgets(cmd, 256, stdin) == NULL) break;
 
-            // join (j) net id [cite: 133]
+            // join (j) net id 
             if (strncmp(cmd, "j", 1) == 0) {
                 int net_val;
                 char new_id[MAX_ID];
@@ -114,36 +114,36 @@ int main(int argc, char *argv[]) {
                     add_route(&node, node.id, node.id, 0);
 
                     char reg_msg[128], res[1024];
-                    // REG tid 0 net id IP TCP (Solicita registo) [cite: 186]
+                    // REG tid 0 net id IP TCP (Solicita registo) 
                     sprintf(reg_msg, "REG %03d 0 %03d %s %s %d\n", rand()%1000, node.net, node.id, node.ip, node.port);
                     if (udp_comm(regIP, regUDP, reg_msg, res) > 0) {
                         printf("Joined network %03d as node %s. Server: %s", node.net, node.id, res);
                     }
                 }
             }
-            // show nodes (n) net [cite: 137]
+            // show nodes (n) net 
             else if (strncmp(cmd, "n", 1) == 0) {
                 int target_net;
                 if (sscanf(cmd, "%*s %d", &target_net) == 1) {
                     char msg[128], res[2048];
-                    // NODES tid 0 net (Solicita lista de nós) [cite: 174]
+                    // NODES tid 0 net (Solicita lista de nós) 
                     sprintf(msg, "NODES %03d 0 %03d\n", rand()%1000, target_net);
                     if (udp_comm(regIP, regUDP, msg, res) > 0) {
                         printf("Nodes in network %03d:\n%s", target_net, res);
                     }
                 }
             }
-            // leave (l) [cite: 139]
+            // leave (l) 
             else if (strncmp(cmd, "l", 1) == 0) {
                 perform_leave(&node, regIP, regUDP);
             }
-            // exit (x) [cite: 143]
+            // exit (x) 
             else if (strncmp(cmd, "x", 1) == 0 || strncmp(cmd, "exit", 4) == 0) {
-                perform_leave(&node, regIP, regUDP); // Leave automático antes de sair [cite: 144]
+                perform_leave(&node, regIP, regUDP); // Leave automático antes de sair 
                 exit(0);
             }
 
-            // add edge (ae) id [cite: 144]
+            // add edge (ae) id 
             else if (strncmp(cmd, "ae", 2) == 0) {
                 char target_id[MAX_ID];
                 sscanf(cmd, "%*s %s", target_id);
@@ -165,12 +165,12 @@ int main(int argc, char *argv[]) {
                     }
                 }
             }
-            // announce (a) [cite: 151]
+            // announce (a) 
             else if (strncmp(cmd, "a", 1) == 0) {
                 add_route(&node, node.id, node.id, 0); 
                 broadcast_routes(&node); 
             }
-            // message (m) dest message [cite: 156]
+            // message (m) dest message 
             else if (strncmp(cmd, "m", 1) == 0) {
                 char dest[MAX_ID], chat_payload[128];
                 if (sscanf(cmd, "%*s %s %[^\n]", dest, chat_payload) == 2) {
@@ -181,8 +181,8 @@ int main(int argc, char *argv[]) {
                 print_routes(&node);
             }
         }
-        
-        // --- 2. NOVAS CONEXÕES TCP (accept) [cite: 232] ---
+
+        // --- 2. NOVAS CONEXÕES TCP (accept) ---
         if (FD_ISSET(node.server_socket, &readfds)) {
             struct sockaddr_in client_addr;
             socklen_t addr_len = sizeof(client_addr);

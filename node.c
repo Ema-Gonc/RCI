@@ -4,14 +4,14 @@
 
 void node_init(Node *n, char *id, char *ip, int port) {
     strcpy(n->id, id);
-    strcpy(n->ip, ip);      // Guarda o IP passado no comando de invocação [cite: 126]
+    strcpy(n->ip, ip);      // Guarda o IP passado no comando de invocação 
     n->port = port;
-    n->net = 0;             // Inicializado a 0, será atualizado no comando 'join' [cite: 135]
+    n->net = 0;             // Inicializado a 0, será atualizado no comando 'join' 
 
     n->neighbor_count = 0;
     n->route_count = 0;
 
-    // Inicializa a distância a si próprio como 0 [cite: 56]
+    // Inicializa a distância a si próprio como 0 
     add_route(n, id, id, 0); 
 }
 Route* find_route(Node *n, char *dest) {

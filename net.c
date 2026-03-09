@@ -52,19 +52,19 @@ int recv_msg(int sock,char *buf){
 }
 
 int udp_comm(char *ip, int port, char *msg, char *res) {
-    int s = socket(AF_INET, SOCK_DGRAM, 0); // Socket UDP [cite: 229]
+    int s = socket(AF_INET, SOCK_DGRAM, 0); // Socket UDP 
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     inet_aton(ip, &addr.sin_addr);
 
-    sendto(s, msg, strlen(msg), 0, (struct sockaddr*)&addr, sizeof(addr)); // [cite: 230]
+    sendto(s, msg, strlen(msg), 0, (struct sockaddr*)&addr, sizeof(addr)); // 
     
     struct timeval tv;
     tv.tv_sec = 2; tv.tv_usec = 0;
     setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)); // Timeout para UDP
 
-    int n = recvfrom(s, res, 1024, 0, NULL, NULL); // [cite: 230]
+    int n = recvfrom(s, res, 1024, 0, NULL, NULL); // 
     if (n > 0) res[n] = 0;
     close(s);
     return n;
