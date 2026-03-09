@@ -134,13 +134,14 @@ int main(int argc,char *argv[]){
 
                 sscanf(cmd,"join %s %s %d",id,ip,&port);
 
-                int s=tcp_connect(ip,port);
+                int s = tcp_connect(ip, port);
+    add_neighbor(&node, id, ip, port);
+    node.neighbors[node.neighbor_count-1].socket = s;
+    add_route(&node, id, id, 1);
+    
 
-                add_neighbor(&node,id,ip,port);
-
-                node.neighbors[node.neighbor_count-1].socket=s;
-                add_route(&node,id,id,1);
-                printf("Connected to %s\n",id);
+    send_routes(&node); 
+    printf("Connected to %s and sent routing table\n", id);
             }
 
             else if(strncmp(cmd,"add edge",8)==0){
@@ -213,16 +214,26 @@ int main(int argc,char *argv[]){
             }
         }
 
-        if(FD_ISSET(node.server_socket,&readfds)){
+        if(FD_ISSET(node.server_socket, &readfds)){
+    struct sockaddr_in client_addr;
+    socklen_t addr_len = sizeof(client_addr);
+    int s = accept(node.server_socket, (struct sockaddr*)&client_addr, &addr_len);
 
-            struct sockaddr_in client_addr;
+    if (s > 0) {
+        // Registra o nó que se ligou. Usamos o IP real dele (inet_ntoa)
+        // O ID começa como "unknown" até recebermos a primeira ROUTE ou CHAT
+        add_neighbor(&node, "unknown", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+        
+        // Atribui o socket ao novo vizinho para que ele entre no select()
+        node.neighbors[node.neighbor_count - 1].socket = s;
+        
+        printf("New node connected from %s (socket %d)\n", inet_ntoa(client_addr.sin_addr), s);
+        
+        // Envia as rotas conhecidas para que o novo nó aprenda sobre a rede
+        send_routes(&node); 
+    }
 
-            socklen_t addr_len=sizeof(client_addr);
-
-            int s=accept(node.server_socket,(struct sockaddr*)&client_addr,&addr_len);
-
-            printf("New node connected (socket %d)\n",s);
-        }
+}
 
         for(int i=0;i<node.neighbor_count;i++){
 
