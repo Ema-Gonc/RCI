@@ -3,8 +3,8 @@ CFLAGS=-Wall
 
 OBJ=main.o node.o net.o message.o routing.o
 
-overlay: $(OBJ)
-	$(CC) $(CFLAGS) -o overlay $(OBJ)
+OWR: $(OBJ)
+	$(CC) $(CFLAGS) -o OWR $(OBJ)
 
 clean:
-	rm -f *.o overlay
+	rm -f *.o OWR
