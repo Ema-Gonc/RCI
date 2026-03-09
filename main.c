@@ -44,12 +44,6 @@ int main(int argc, char *const *argv)
     return EXIT_FAILURE;
   }
 
-  const char *ip = argv[1];
-  const char *tcp_port = argv[2];
-
-  const char *reg_ip = (argc >= 4) ? argv[3] : DEFAULT_RIP;
-  const char *reg_udp_port = (argc == 5) ? argv[4] : "59000";
-
   strncpy(config.IP, argv[1], sizeof(config.IP) - 1);
   config.IP[sizeof(config.IP) - 1] = '\0';
   strncpy(config.TCP, argv[2], sizeof(config.TCP) - 1);
