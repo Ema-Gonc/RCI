@@ -9,6 +9,8 @@ void node_init(Node *n,char *id,int port){
 
     n->neighbor_count=0;
     n->route_count=0;
+
+    add_route(n,id,id,0);
 }
 
 void add_neighbor(Node *n,char *id,char *ip,int port){
