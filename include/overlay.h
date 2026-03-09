@@ -17,7 +17,7 @@ extern Neighbor neighbors[MAX_NODES];
 
 int o_tcp_listener_init(const char *ip, const char *port);
 
-int o_connect_out(const char *target_ip, const char *target_port, int my_id);
+int o_connect_out(const char *target_ip, const char *target_port, int target_id, int my_id);
 void o_accept_in(int listen_fd);
 
 void o_init_nb(void);

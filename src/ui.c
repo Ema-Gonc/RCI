@@ -15,7 +15,7 @@ static void ui_print_help(void)
     printf("Available commands:\n");
     printf("  help | h\n");
     printf("  join | j <net> <id>\n");
-    printf("  show nodes | n <net>\n");
+    printf("  show nodes | n [<net>]\n");
     printf("  leave | l\n");
     printf("  exit | x\n");
     printf("  add edge | ae <id>\n");
@@ -66,15 +66,20 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd)
     // 2. SHOW NODES: show nodes (n) net
     else if (strcmp(command, "n") == 0 || (strncmp(input, "show nodes", 10) == 0))
     {
-        if (sscanf(input, "%*s %d", &net) == 1 || sscanf(input, "show nodes %d", &net) == 1)
+        int has_net = (sscanf(input, "%*s %d", &net) == 1 || sscanf(input, "show nodes %d", &net) == 1);
+
+        if (!has_net)
         {
-            printf("Requesting list of nodes for network %03d...\n", net);
-            ns_send_nodes(udp_fd, net);
+            if (config->net == -1)
+            {
+                printf("Error: no default network. Join a network or use 'show nodes <net>'.\n");
+                return;
+            }
+            net = config->net;
         }
-        else
-        {
-            printf("Usage: show nodes <net>\n");
-        }
+
+        printf("Requesting list of nodes for network %03d...\n", net);
+        ns_send_nodes(udp_fd, net);
     }
 
     // 3. LEAVE: leave (l)
@@ -205,7 +210,7 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd)
         if (sscanf(input, "%*s %d %63s %31s", &id, ip, tcp) == 3 || sscanf(input, "direct add edge %d %63s %31s", &id, ip, tcp) == 3)
         {
             printf("Directly connecting to node %02d at %s:%s...\n", id, ip, tcp);
-            if (o_connect_out(ip, tcp, config->id) != 0)
+            if (o_connect_out(ip, tcp, id, config->id) != 0)
             {
                 printf("Failed to establish direct edge to node %02d.\n", id);
             }

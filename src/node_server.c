@@ -111,12 +111,6 @@ int ns_send_contact(int udp_fd, int net, int target_id)
   char buffer[128];
   int tid = rand() % 1000; // random tid
 
-  if (g_server_info == NULL)
-  {
-    fprintf(stderr, "Node Server address not initialized. Call ns_udp_init first.\n");
-    return -1;
-  }
-
   sprintf(buffer, "CONTACT %03d 0 %03d %02d\n", tid, net, target_id);
   if (sendto(udp_fd, buffer, strlen(buffer), 0, g_server_info->ai_addr, g_server_info->ai_addrlen) == -1)
   {
@@ -216,21 +210,21 @@ void ns_handle_response(int udp_fd, const AppConfig *config)
     {
       if (op == 1)
       {
-        int net, id;
+        int net, target_id;
         char target_ip[64], target_tcp[32];
 
         // CONTACT NET[3] OP[1] NET[3] ID[2] IP TCP
-        sscanf(buffer, "%*s %*d %*d %d %d %63s %31s", &net, &id, target_ip, target_tcp);
+        sscanf(buffer, "%*s %*d %*d %d %d %63s %31s", &net, &target_id, target_ip, target_tcp);
 
-        printf("Connecting to Node %02d at %s:%s...\n", id, target_ip, target_tcp);
+        printf("Connecting to Node %02d at %s:%s...\n", target_id, target_ip, target_tcp);
         if (config == NULL || config->id < 0)
         {
           printf("Error: local node id is not set. Join a network before adding edges.\n");
           return;
         }
 
-        if (o_connect_out(target_ip, target_tcp, config->id) != 0)
-          printf("CONTACT connect failed for node %02d.\n", id);
+        if (o_connect_out(target_ip, target_tcp, target_id, config->id) != 0)
+          printf("CONTACT connect failed for node %02d.\n", target_id);
       }
       else if (op == 2)
       {

@@ -104,7 +104,7 @@ void o_accept_in(int listen_fd)
   memset(neighbors[slot].tcp, 0, sizeof(neighbors[slot].tcp));
 }
 
-int o_connect_out(const char *target_ip, const char *target_port, int my_id)
+int o_connect_out(const char *target_ip, const char *target_port, int target_id, int my_id)
 {
   struct addrinfo hints, *res;
   int edge_fd, errcode;
@@ -176,7 +176,7 @@ int o_connect_out(const char *target_ip, const char *target_port, int my_id)
   }
 
   neighbors[slot].fd = edge_fd;
-  neighbors[slot].id = -1;
+  neighbors[slot].id = target_id;
   strncpy(neighbors[slot].ip, target_ip, sizeof(neighbors[slot].ip) - 1);
   neighbors[slot].ip[sizeof(neighbors[slot].ip) - 1] = '\0';
   strncpy(neighbors[slot].tcp, target_port, sizeof(neighbors[slot].tcp) - 1);
