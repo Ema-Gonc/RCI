@@ -145,8 +145,8 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd)
                 return;
             }
 
+            printf("Removing edge with node %02d.\n", id);
             o_rm_nb(id);
-            printf("Removed edge with node %02d.\n", id);
         }
         else
         {

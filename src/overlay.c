@@ -250,8 +250,8 @@ void o_read_nb(fd_set *read_fds)
     }
     else if (n == 0)
     {
-      clear_slot(i);
       printf("Neighbor %02d disconnected. Closing edge (FD: %d)\n", neighbors[i].id, fd);
+      clear_slot(i);
     }
     else
     {
