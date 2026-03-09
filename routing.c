@@ -208,15 +208,11 @@ void process_uncoord_msg(Node *node, char *j, char *t) {
 
         // 3. Se todos terminaram, regressa ao estado de expedição 
         if (all_done) {
-            r->state = STATE_EXPEDITION; // state[t] := 0 
+            r->state = STATE_EXPEDITION;
             printf("Node returned to expedition state for destination %s\n", t);
-
-            // Se conhecemos uma rota (custo < INF), anunciamos aos vizinhos 
             if (r->cost < INF) {
                 broadcast_routes(node);
             }
-
-             
             if (strcmp(r->succ_coord, "-1") != 0) {
                 send_uncoord(node, r->succ_coord, t); 
             }
