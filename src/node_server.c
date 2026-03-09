@@ -124,6 +124,7 @@ int ns_send_contact(int udp_fd, int net, int target_id)
     return -1;
   }
 
+  printf("-> %s", buffer);
   return tid;
 }
 

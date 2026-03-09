@@ -79,7 +79,7 @@ int main(int argc, char *const *argv)
   int udp_fd = ns_udp_init(config.regIP, config.regUDP);
   int tcp_listen_fd = o_tcp_listener_init(config.IP, config.TCP);
 
-  printf("Node initialized on %s:%s. Connecting to Node Server at %s:%s.\n",
+  printf("Node initialized on %s:%s\n. Connecting to Node Server at %s:%s.\n",
          config.IP, config.TCP, config.regIP, config.regUDP);
   printf("Type commands to start. Try 'join <net> <id>' or 'help'.\n");
 
