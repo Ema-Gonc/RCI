@@ -5,287 +5,182 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <arpa/inet.h>
+#include <time.h>
 
 #include "message.h"
 #include "routing.h"
 #include "node.h"
 #include "net.h"
 
-void forward_chat(Node *node, char *dest, char *msg) {
+// Função para identificar o nó após a criação de uma aresta
+void send_neighbor_hello(int sock, char *my_id) {
+    char hello[64];
+    sprintf(hello, "NEIGHBOR %s\n", my_id); // Formato exigido [cite: 195]
+    send_msg(sock, hello);
+}
 
+// Encaminha mensagens de chat pelo caminho mais curto [cite: 17, 207]
+void forward_chat(Node *node, char *origin, char *dest, char *msg) {
     char *next = get_next_hop(node, dest);
-
     if (next == NULL) {
         printf("No route to %s\n", dest);
         return;
     }
 
     for (int i = 0; i < node->neighbor_count; i++) {
-
         if (strcmp(node->neighbors[i].id, next) == 0) {
-
             char buffer[512];
-
-            sprintf(buffer, "CHAT %s %s\n", dest, msg);
-
+            // Formato: CHAT origin dest chat<LF> [cite: 206]
+            sprintf(buffer, "CHAT %s %s %s\n", origin, dest, msg);
             send_msg(node->neighbors[i].socket, buffer);
-
             return;
         }
     }
 }
 
-void show_neighbors(Node *node){
-
-    printf("Neighbors:\n");
-
-    for(int i=0;i<node->neighbor_count;i++){
-
-        printf("%s %s %d\n",
-        node->neighbors[i].id,
-        node->neighbors[i].ip,
-        node->neighbors[i].port);
-    }
-}
-
-void show_nodes(Node *node){
-
-    printf("Known nodes:\n");
-
-    for(int i=0;i<node->route_count;i++){
-
-        printf("%s\n",node->routes[i].dest);
-    }
-}
-
-void remove_edge(Node *node,char *id){
-
-    for(int i=0;i<node->neighbor_count;i++){
-
-        if(strcmp(node->neighbors[i].id,id)==0){
-
-            close(node->neighbors[i].socket);
-
-            for(int j=i;j<node->neighbor_count-1;j++)
-                node->neighbors[j]=node->neighbors[j+1];
-
-            node->neighbor_count--;
-
-            printf("Edge removed: %s\n",id);
-
-            return;
-        }
-    }
-
-    printf("Neighbor not found\n");
-}
-
-int main(int argc,char *argv[]){
-
-    if(argc<3){
-
-        printf("usage: node id port\n");
+int main(int argc, char *argv[]) {
+    // Invocação: OWR IP TCP [regIP regUDP] [cite: 125]
+    if (argc < 3) {
+        printf("usage: %s IP TCP [regIP regUDP]\n", argv[0]);
         return 0;
     }
 
+    srand(time(NULL));
+    char *myIP = argv[1];
+    int myPort = atoi(argv[2]);
+    char *regIP = (argc > 3) ? argv[3] : "193.136.138.142"; // [cite: 128]
+    int regUDP = (argc > 4) ? atoi(argv[4]) : 59000;
+
     Node node;
-
-    node_init(&node,argv[1],atoi(argv[2]));
-
-    node.server_socket=tcp_server(node.port);
-
-    printf("Node %s running\n",node.id);
+    node_init(&node, "99", myIP, myPort); 
+    node.server_socket = tcp_server(node.port); // [cite: 232]
+    printf("Node running on %s:%d\n", node.ip, node.port);
 
     fd_set readfds;
 
     while(1){
-
         FD_ZERO(&readfds);
+        FD_SET(0, &readfds); // stdin [cite: 227]
+        FD_SET(node.server_socket, &readfds);
 
-        FD_SET(0,&readfds);
-        FD_SET(node.server_socket,&readfds);
-
-        int maxfd=node.server_socket;
-
-        for(int i=0;i<node.neighbor_count;i++){
-
-            int s=node.neighbors[i].socket;
-
-            if(s>0){
-
-                FD_SET(s,&readfds);
-
-                if(s>maxfd) maxfd=s;
+        int maxfd = node.server_socket;
+        for (int i = 0; i < node.neighbor_count; i++) {
+            int s = node.neighbors[i].socket;
+            if (s > 0) {
+                FD_SET(s, &readfds);
+                if (s > maxfd) maxfd = s;
             }
         }
 
-        select(maxfd+1,&readfds,NULL,NULL,NULL);
+        // Multiplexagem de entradas síncronas 
+        select(maxfd + 1, &readfds, NULL, NULL, NULL);
 
-        if(FD_ISSET(0,&readfds)){
-
+        // --- 1. COMANDOS DO UTILIZADOR ---
+        if (FD_ISSET(0, &readfds)) {
             char cmd[256];
+            if (fgets(cmd, 256, stdin) == NULL) break;
 
-            fgets(cmd,256,stdin);
-
-            if(strncmp(cmd,"join",4)==0){
-
-                char id[32],ip[64];
-                int port;
-
-                sscanf(cmd,"join %s %s %d",id,ip,&port);
-
-                int s = tcp_connect(ip, port);
-    add_neighbor(&node, id, ip, port);
-    node.neighbors[node.neighbor_count-1].socket = s;
-    add_route(&node, id, id, 1);
-    
-
-    send_routes(&node); 
-    printf("Connected to %s and sent routing table\n", id);
-            }
-
-            else if(strncmp(cmd,"add edge",8)==0){
-
-                char id[32],ip[64];
-                int port;
-
-                sscanf(cmd,"add edge %s %s %d",id,ip,&port);
-
-                int s=tcp_connect(ip,port);
-
-                add_neighbor(&node,id,ip,port);
-
-                node.neighbors[node.neighbor_count-1].socket=s;
-                add_route(&node,id,id,1);
-                printf("Edge created with %s\n",id);
-            }
-
-            else if(strncmp(cmd,"remove edge",11)==0){
-
-                char id[32];
-
-                sscanf(cmd,"remove edge %s",id);
-
-                remove_edge(&node,id);
-            }
-
-            else if(strncmp(cmd,"show neighbors",14)==0){
-
-                show_neighbors(&node);
-            }
-
-            else if(strncmp(cmd,"show nodes",10)==0){
-
-                show_nodes(&node);
-            }
-
-            else if(strncmp(cmd,"chat",4)==0){
-
-                char dest[32];
-                char msg[256];
-
-                sscanf(cmd,"chat %s %[^\n]",dest,msg);
-
-                forward_chat(&node,dest,msg);
-            }
-
-            else if(strncmp(cmd,"leave",5)==0){
-
-                for(int i=0;i<node.neighbor_count;i++){
-
-                    close(node.neighbors[i].socket);
+            // join (j) net id [cite: 132]
+            if (strncmp(cmd, "j", 1) == 0) {
+                int net_val;
+                char new_id[MAX_ID];
+                if (sscanf(cmd, "%*s %d %s", &net_val, new_id) == 2) {
+                    node.net = net_val;
+                    strcpy(node.id, new_id);
+                    // Registo UDP no servidor [cite: 182]
+                    char reg_msg[128], res[1024];
+                    sprintf(reg_msg, "REG %03d 0 %03d %s %s %d\n", rand()%1000, node.net, node.id, node.ip, node.port);
+                    udp_comm(regIP, regUDP, reg_msg, res); 
                 }
-
-                node.neighbor_count=0;
-
-                printf("Left overlay network\n");
             }
-
-            else if(strncmp(cmd,"exit",4)==0){
-
-                printf("Exiting...\n");
-
-                exit(0);
-            }
-
-            else if(strncmp(cmd,"routes",6)==0){
-
-                print_routes(&node);
-            }
-        }
-
-        if(FD_ISSET(node.server_socket, &readfds)){
-    struct sockaddr_in client_addr;
-    socklen_t addr_len = sizeof(client_addr);
-    int s = accept(node.server_socket, (struct sockaddr*)&client_addr, &addr_len);
-
-    if (s > 0) {
-        // Registra o nó que se ligou. Usamos o IP real dele (inet_ntoa)
-        // O ID começa como "unknown" até recebermos a primeira ROUTE ou CHAT
-        add_neighbor(&node, "unknown", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
-        
-        // Atribui o socket ao novo vizinho para que ele entre no select()
-        node.neighbors[node.neighbor_count - 1].socket = s;
-        
-        printf("New node connected from %s (socket %d)\n", inet_ntoa(client_addr.sin_addr), s);
-        
-        // Envia as rotas conhecidas para que o novo nó aprenda sobre a rede
-        send_routes(&node); 
-    }
-
-}
-
-        for(int i=0;i<node.neighbor_count;i++){
-
-            int s=node.neighbors[i].socket;
-
-            if(s>0 && FD_ISSET(s,&readfds)){
-
-                char buf[512];
-
-                int n=recv_msg(s,buf);
-
-                if(n<=0){
-
-                    close(s);
-
-                    node.neighbors[i].socket=-1;
-                }
-
-                else{
-
-                    char type[32],dest[32],msg[256];
-
-                    if(sscanf(buf,"%s %s",type,dest)>=2){
-
-                        if(strcmp(type,"CHAT")==0){
-
-                            sscanf(buf,"%*s %*s %[^\n]",msg);
-
-                            if(strcmp(dest,node.id)==0){
-
-                                printf("Message received: %s\n",msg);
-                            }
-
-                            else{
-
-                                forward_chat(&node,dest,msg);
+            // add edge (ae) id [cite: 144]
+            else if (strncmp(cmd, "ae", 2) == 0) {
+                char target_id[MAX_ID];
+                sscanf(cmd, "%*s %s", target_id);
+                
+                char contact_msg[128], res[1024];
+                sprintf(contact_msg, "CONTACT %03d 0 %03d %s\n", rand()%1000, node.net, target_id); 
+                
+                if (udp_comm(regIP, regUDP, contact_msg, res) > 0) {
+                    char resp_type[16], target_ip[64], r_id[MAX_ID];
+                    int r_tid, r_op, r_net, target_port;
+                    if (sscanf(res, "%s %d %d %d %s %s %d", resp_type, &r_tid, &r_op, &r_net, r_id, target_ip, &target_port) >= 7) {
+                        if (r_op == 1) {
+                            int s = tcp_connect(target_ip, target_port); // 
+                            if (s > 0) {
+                                add_neighbor(&node, target_id, target_ip, target_port);
+                                node.neighbors[node.neighbor_count - 1].socket = s;
+                                send_neighbor_hello(s, node.id); 
+                                printf("Edge established with %s\n", target_id);
                             }
                         }
+                    }
+                }
+            }
+            // announce (a) [cite: 150, 151]
+            else if (strncmp(cmd, "a", 1) == 0) {
+                add_route(&node, node.id, node.id, 0); 
+                broadcast_routes(&node); // Envia ROUTE [cite: 199]
+            }
+            // message (m) dest message [cite: 156]
+            else if (strncmp(cmd, "m", 1) == 0) {
+                char dest[MAX_ID], chat_payload[128];
+                if (sscanf(cmd, "%*s %s %[^\n]", dest, chat_payload) == 2) {
+                    forward_chat(&node, node.id, dest, chat_payload);
+                }
+            }
+            else if (strncmp(cmd, "exit", 4) == 0 || strncmp(cmd, "x", 1) == 0) {
+                exit(0); // [cite: 142]
+            }
+        }
 
-                        else if(strcmp(type,"ROUTE")==0){
+        // --- 2. NOVAS CONEXÕES TCP ---
+        if (FD_ISSET(node.server_socket, &readfds)) {
+            struct sockaddr_in client_addr;
+            socklen_t addr_len = sizeof(client_addr);
+            int s = accept(node.server_socket, (struct sockaddr*)&client_addr, &addr_len); // [cite: 232]
+            if (s > 0) {
+                add_neighbor(&node, "unknown", inet_ntoa(client_addr.sin_addr), ntohs(client_addr.sin_port));
+                node.neighbors[node.neighbor_count - 1].socket = s;
+                send_neighbor_hello(s, node.id); 
+                printf("Accepted connection (socket %d)\n", s);
+            }
+        }
 
-                            int cost;
-
-                            sscanf(buf,"%*s %s %d",dest,&cost);
-
-                            process_route_update(&node,node.neighbors[i].id,dest,cost);
+        // --- 3. MENSAGENS DOS VIZINHOS ---
+        for (int i = 0; i < node.neighbor_count; i++) {
+            int s = node.neighbors[i].socket;
+            if (s > 0 && FD_ISSET(s, &readfds)) {
+                char buf[BUFFER_SIZE];
+                if (recv_msg(s, buf) <= 0) { // Falha/Remoção de aresta [cite: 76, 99]
+                    char failed_id[MAX_ID];
+                    strcpy(failed_id, node.neighbors[i].id);
+                    close(s);
+                    node.neighbors[i].socket = -1;
+                    handle_edge_failure(&node, failed_id); 
+                } else {
+                    char type[32], arg1[MAX_ID], arg2[MAX_ID];
+                    if (sscanf(buf, "%s %s", type, arg1) >= 2) {
+                        if (strcmp(type, "NEIGHBOR") == 0) {
+                            strcpy(node.neighbors[i].id, arg1);
+                        }
+                        else if (strcmp(type, "CHAT") == 0) {
+                            char origin[MAX_ID], dest[MAX_ID], msg_body[128];
+                            sscanf(buf, "%*s %s %s %[^\n]", origin, dest, msg_body);
+                            if (strcmp(dest, node.id) == 0) printf("From %s: %s\n", origin, msg_body);
+                            else forward_chat(&node, origin, dest, msg_body);
+                        }
+                        else if (strcmp(type, "ROUTE") == 0) {
+                            sscanf(buf, "%*s %s %s", arg1, arg2);
+                            process_route_update(&node, node.neighbors[i].id, arg1, atoi(arg2));
+                        }
+                        else if (strcmp(type, "COORD") == 0) {
+                            process_coord_msg(&node, node.neighbors[i].id, arg1); // [cite: 68, 201]
                         }
                     }
                 }
             }
         }
     }
-
     return 0;
 }
