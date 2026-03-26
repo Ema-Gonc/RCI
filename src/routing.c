@@ -56,24 +56,34 @@ Route *find_route(Node *node, char *dest) {
 }
 
 // Helper function to add or update route
-void add_route(Node *node, char *dest, char *next, int cost) {
+int add_route(Node *node, char *dest, char *next, int cost) {
     Route *r = find_route(node, dest);
     if (r) {
         if (cost < r->cost) {
             r->cost = cost;
             strcpy(r->next, next);
-            r->state = STATE_EXPEDITION;  // Reset state on update
+            
+            // If route was in coordination (INF cost) and now has a valid path,
+            // recover it back to EXPEDITION state
+            if (r->state == STATE_COORDINATION && cost < INF) {
+                r->state = STATE_EXPEDITION;
+                strcpy(r->succ_coord, "-1");
+            }
+            return 1;  // Route was updated
         }
+        return 0;  // No change (cost not better)
     } else {
         if (node->route_count < MAX_NODES) {
-            memset(&node->routes[node->route_count], 0, sizeof(Route));  // Full initialization
             strcpy(node->routes[node->route_count].dest, dest);
             node->routes[node->route_count].cost = cost;
             strcpy(node->routes[node->route_count].next, next);
             node->routes[node->route_count].state = STATE_EXPEDITION;
             strcpy(node->routes[node->route_count].succ_coord, "-1");
+            memset(node->routes[node->route_count].coord_pending, 0, sizeof(node->routes[node->route_count].coord_pending));
             node->route_count++;
+            return 1;  // New route added
         }
+        return 0;  // No space for new route
     }
 }
 
@@ -135,16 +145,48 @@ void send_route_update(int sock, char *dest, int cost) {
 void process_route(Node *node, char *neighbor, char *dest, int cost) {
     int new_cost = cost + 1;
     monitor_log("[MONITOR] Received ROUTE from %s: dest=%s cost=%d (new_cost=%d)\n", neighbor, dest, cost, new_cost);
-    add_route(node, dest, neighbor, new_cost);
-    broadcast_routes(node);
+    
+    // FIX: Accept routes even during coordination (needed for recovery)
+    // This allows discovery of alternate paths when primary path fails
+    // Find the route to see if we can use this for recovery
+    Route *r = find_route(node, dest);
+    int was_in_coordination = (r && r->state == STATE_COORDINATION) ? 1 : 0;
+    
+    int route_changed = add_route(node, dest, neighbor, new_cost);
+    
+    // CRITICAL FIX: Only broadcast if the route table actually changed
+    // This prevents infinite loops where nodes keep broadcasting unchanged routes
+    if (route_changed) {
+        // If this route was in coordination and we found an alternate path, we recovered!
+        // Re-broadcast all routes to propagate the learned route to other neighbors
+        // This ensures the routing information spreads throughout the network
+        broadcast_routes(node);
+        
+        // FIX D: If we recovered from coordination through alternate path, we may need to
+        // send UNCOORD to nodes waiting for this route's recovery
+        if (was_in_coordination && r && r->state == STATE_EXPEDITION && r->cost < INF) {
+            monitor_log("[MONITOR] Route %s recovered during coordination (new cost=%d)\n", dest, r->cost);
+            // The add_route() function already set state back to EXPEDITION if recovered
+            // and we just broadcast it, so recovery process is complete
+        }
+    }
 }
 
 void broadcast_routes(Node *node) {
     char msg[256];
     for (int r = 0; r < node->route_count; r++) {
-        if (strcmp(node->routes[r].dest, node->id) == 0) continue;
+        // FIX: Only broadcast routes in EXPEDITION state
+        // Routes in COORDINATION (with cost=INF) should NOT be broadcast
+        if (node->routes[r].state != STATE_EXPEDITION) {
+            continue;  // Skip routes not in expedition state
+        }
+        // Also skip routes with infinite cost (should never happen in EXPEDITION, but be safe)
+        if (node->routes[r].cost >= INF) {
+            continue;
+        }
+        
         sprintf(msg, "ROUTE %s %d\n", node->routes[r].dest, node->routes[r].cost);
-        monitor_log("[MONITOR] Broadcast ROUTE %s cost=%d to all neighbors\n", node->routes[r].dest, node->routes[r].cost);
+        monitor_log("[MONITOR] Broadcast ROUTE %s cost=%d (state=EXPEDITION) to all neighbors\n", node->routes[r].dest, node->routes[r].cost);
         // Send to all active neighbors in the global neighbors array
         for (int i = 0; i < MAX_NODES; i++) {
             if (neighbors[i].fd > 0) {

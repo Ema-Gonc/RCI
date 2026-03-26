@@ -24,7 +24,7 @@ typedef struct {
   char next[64];
   int state;
   char succ_coord[64];
-  char coord_pending[MAX_NODES];
+  int coord_pending[MAX_NODES];
 } Route;
 
 typedef struct {

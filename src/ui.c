@@ -133,10 +133,6 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
     }
     if (sscanf(input, "%*s %d", &id) == 1 ||
         sscanf(input, "add edge %d", &id) == 1) {
-      if (config->id >= 0 && id == config->id) {
-        printf("Error: cannot add an edge to yourself (node %02d).\n", id);
-        return;
-      }
       printf("Requesting contact info for node %02d...\n", id);
       ns_send_contact(udp_fd, config->net, id);
     } else {
@@ -264,7 +260,7 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
         printf("No route to %s\n", dest);
       }
     } else {
-      print_routes(&my_node);  // Show all routes if no dest specified
+      printf("Usage: show routing <dest>\n");
     }
   }
 

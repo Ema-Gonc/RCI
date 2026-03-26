@@ -1,10 +1,13 @@
-CC=gcc
-CFLAGS=-Wall
+CC = gcc
+CFLAGS = -std=c99 -pedantic -g -DDEBUG -Wall -Wextra -Werror -Wwrite-strings
+OPTLVL = 3
+TARGET = owr
 
-OBJ=main.o node.o net.o message.o routing.o
-
-OWR: $(OBJ)
-	$(CC) $(CFLAGS) -o OWR $(OBJ)
+$(TARGET):
+	$(CC) main.c src/*.c -o $(TARGET) -O$(OPTLVL) $(CFLAGS)
 
 clean:
-	rm -f *.o OWR
+	rm -f ./$(TARGET)
+
+tv:
+	valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes ./$(TARGET)

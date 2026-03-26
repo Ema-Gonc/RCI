@@ -8,13 +8,10 @@
  * - Integração com o mecanismo de multiplexagem (select) para monitorização de múltiplos FDs.
  */
 
-
-
 #define _GNU_SOURCE
 
 #include "../include/overlay.h"
 #include "../include/common.h"
-#include "../include/routing.h"
 #include "../include/routing.h"
 
 #include <netdb.h>
@@ -230,11 +227,15 @@ void o_add_nb(int id, int fd, const char *ip, const char *tcp) {
     neighbors[slot].tcp[sizeof(neighbors[slot].tcp) - 1] = '\0';
   }
 
-  // Add direct route to the neighbor
-  add_route(&my_node, neighbors[slot].id, neighbors[slot].id, 1);
-
+  // Create direct route to this neighbor (cost = 1) before broadcasting
+  // This ensures the routing invariant: if neighbor exists, route must exist
+  char neighbor_id[64];
+  sprintf(neighbor_id, "%02d", id);
+  add_route(&my_node, neighbor_id, neighbor_id, 1);
+  
   // Automatically announce current routing table after establishing an edge.
-  // This ensures any new neighbor receives the routing state immediately.
+  // This ensures any new neighbor receives the routing state immediately,
+  // including the route to this newly established neighbor.
   broadcast_routes(&my_node);
 }
 
@@ -270,15 +271,11 @@ void o_read_nb(fd_set *read_fds) {
               sprintf(neighbors[i].id, "%02d", id);
             } else {
               // Duplicate edge to same neighbor: keep current and close redundant one
-              close(neighbors[existing_slot].fd);
-              neighbors[existing_slot].fd = -1;
-              strcpy(neighbors[existing_slot].id, "-1");
+              // FIX C: Use clear_slot() instead of manual close to ensure proper cleanup
+              // and avoid double-close issues
+              clear_slot(existing_slot);
               sprintf(neighbors[i].id, "%02d", id);
             }
-            // Add direct route to the neighbor
-            add_route(&my_node, neighbors[i].id, neighbors[i].id, 1);
-            // Broadcast routes to the new neighbor
-            broadcast_routes(&my_node);
             // printf("Successfully established edge with Node %02d!\n", id);
           }
         } else if (strcmp(command, "ROUTE") == 0) {

@@ -93,8 +93,8 @@ int main(int argc, char *const *argv) {
   int udp_fd = ns_udp_init(config.regIP, config.regUDP);
   int tcp_listen_fd = o_tcp_listener_init(config.IP, config.TCP);
  
-  printf("Nó inicializado em %s:%s.\n",
-         config.IP, config.TCP, config.regIP, config.regUDP);
+  printf("Nó inicializado em %s:%s (reg: %s:%s).\n",
+         config.IP, config.TCP);
   
 
   fd_set read_fds;
