@@ -1,11 +1,14 @@
 
 /*
  * Módulo de Gestão da Camada Overlay (TCP):
- * - Inicialização de servidor TCP e estabelecimento de conexões ativas com pares.
+ * - Inicialização de servidor TCP e estabelecimento de conexões ativas com
+ * pares.
  * - Implementação do handshake "NEIGHBOR" para troca de identidades entre nós.
  * - Gestão dinâmica da tabela de vizinhos (ID, IP, Porto e File Descriptors).
- * - Tratamento de eventos de rede: aceitação, leitura de dados e fecho de sockets.
- * - Integração com o mecanismo de multiplexagem (select) para monitorização de múltiplos FDs.
+ * - Tratamento de eventos de rede: aceitação, leitura de dados e fecho de
+ * sockets.
+ * - Integração com o mecanismo de multiplexagem (select) para monitorização de
+ * múltiplos FDs.
  */
 
 #define _GNU_SOURCE
@@ -14,6 +17,7 @@
 #include "../include/common.h"
 #include "../include/routing.h"
 
+#include <errno.h>
 #include <netdb.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -30,23 +34,27 @@ extern AppConfig config;
 
 // Helper function to log messages if monitoring enabled
 static void monitor_log(const char *format, ...) {
-    if (config.monitor) {
-        va_list args;
-        va_start(args, format);
-        vprintf(format, args);
-        va_end(args);
-    }
+  if (config.monitor) {
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+  }
 }
 
-static char g_local_ip[64] = {0};
-static char g_local_tcp[32] = {0};
+static char global_local_ip[64] = {0};
+static char global_local_tcp[32] = {0};
+
+#define RX_BUFFER_SIZE 2048
+static char global_rx_buffers[MAX_NODES][RX_BUFFER_SIZE];
+static size_t global_rx_lengths[MAX_NODES] = {0};
 
 extern Node my_node;
 
 static int find_free_slot(void);
 static int find_slot_by_id(int id);
 static void clear_slot(int slot);
-static int format_node_id(char out[3], int id);
+static void process_line_from_neighbor(int slot, const char *line);
 
 int o_tcp_listener_init(const char *ip, const char *port) {
   struct addrinfo hints, *res;
@@ -58,12 +66,12 @@ int o_tcp_listener_init(const char *ip, const char *port) {
   hints.ai_flags = AI_PASSIVE;
 
   if (ip != NULL) {
-    strncpy(g_local_ip, ip, sizeof(g_local_ip) - 1);
-    g_local_ip[sizeof(g_local_ip) - 1] = '\0';
+    strncpy(global_local_ip, ip, sizeof(global_local_ip) - 1);
+    global_local_ip[sizeof(global_local_ip) - 1] = '\0';
   }
   if (port != NULL) {
-    strncpy(g_local_tcp, port, sizeof(g_local_tcp) - 1);
-    g_local_tcp[sizeof(g_local_tcp) - 1] = '\0';
+    strncpy(global_local_tcp, port, sizeof(global_local_tcp) - 1);
+    global_local_tcp[sizeof(global_local_tcp) - 1] = '\0';
   }
 
   (void)ip;
@@ -107,7 +115,7 @@ void o_accept_in(int listen_fd) {
     return;
   }
 
-  // printf("New TCP connection accepted! (FD: %d)\n", new_edge_fd);
+  printf("New TCP connection accepted! (FD: %d)\n", new_edge_fd);
 
   int slot = find_free_slot();
   if (slot == -1) {
@@ -123,6 +131,7 @@ void o_accept_in(int listen_fd) {
   strcpy(neighbors[slot].id, "-1");
   memset(neighbors[slot].ip, 0, sizeof(neighbors[slot].ip));
   memset(neighbors[slot].tcp, 0, sizeof(neighbors[slot].tcp));
+  global_rx_lengths[slot] = 0;
 }
 
 int o_connect_out(const char *target_ip, const char *target_port, int target_id,
@@ -130,10 +139,10 @@ int o_connect_out(const char *target_ip, const char *target_port, int target_id,
   struct addrinfo hints, *res;
   int edge_fd, errcode;
 
-  if (target_ip != NULL && target_port != NULL && g_local_ip[0] != '\0' &&
-      g_local_tcp[0] != '\0') {
-    if (strcmp(target_ip, g_local_ip) == 0 &&
-        strcmp(target_port, g_local_tcp) == 0) {
+  if (target_ip != NULL && target_port != NULL && global_local_ip[0] != '\0' &&
+      global_local_tcp[0] != '\0') {
+    if (strcmp(target_ip, global_local_ip) == 0 &&
+        strcmp(target_port, global_local_tcp) == 0) {
       printf("Error: refusing to connect to self (%s:%s).\n", target_ip,
              target_port);
       return -1;
@@ -169,20 +178,13 @@ int o_connect_out(const char *target_ip, const char *target_port, int target_id,
   char msg[64];
   snprintf(msg, sizeof(msg), "NEIGHBOR %02d\n", my_id);
 
-  ssize_t nleft = strlen(msg);
-  char *ptr = msg;
-  while (nleft > 0) {
-    ssize_t nwritten = write(edge_fd, ptr, nleft);
-    if (nwritten <= 0) {
-      perror("Error sending NEIGHBOR message");
-      close(edge_fd);
-      return -1;
-    }
-    nleft -= nwritten;
-    ptr += nwritten;
+  if (send_msg(edge_fd, msg) != 0) {
+    perror("Error sending NEIGHBOR message");
+    close(edge_fd);
+    return -1;
   }
 
-  // printf("Successfully connected to peer and sent NEIGHBOR message.\n");
+  printf("Successfully connected to peer and sent NEIGHBOR message.\n");
 
   o_add_nb(target_id, edge_fd, target_ip, target_port);
 
@@ -195,6 +197,7 @@ void o_init_nb(void) {
     neighbors[i].fd = -1;
     memset(neighbors[i].ip, 0, sizeof(neighbors[i].ip));
     memset(neighbors[i].tcp, 0, sizeof(neighbors[i].tcp));
+    global_rx_lengths[i] = 0;
   }
 }
 
@@ -216,7 +219,7 @@ void o_add_nb(int id, int fd, const char *ip, const char *tcp) {
   if (neighbors[slot].fd != -1 && neighbors[slot].fd != fd)
     close(neighbors[slot].fd);
 
-  if (format_node_id(neighbors[slot].id, id) != 0) {
+  if (format_id(neighbors[slot].id, id) != 0) {
     if (fd != -1)
       close(fd);
     return;
@@ -237,7 +240,7 @@ void o_add_nb(int id, int fd, const char *ip, const char *tcp) {
   char neighbor_id[64];
   snprintf(neighbor_id, sizeof(neighbor_id), "%02d", id);
   add_route(&my_node, neighbor_id, neighbor_id, 1);
-  
+
   // Automatically announce current routing table after establishing an edge.
   // This ensures any new neighbor receives the routing state immediately,
   // including the route to this newly established neighbor.
@@ -251,10 +254,13 @@ void o_read_nb(fd_set *read_fds) {
     if (fd == -1 || !FD_ISSET(fd, read_fds))
       continue;
 
-    char buffer[256];
-    ssize_t n = read(fd, buffer, sizeof(buffer) - 1);
+    char buffer[512];
+    ssize_t n = read(fd, buffer, sizeof(buffer));
 
     if (n == -1) {
+      if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+        continue;
+      }
       perror("Error reading from neighbor socket");
       clear_slot(i);
     } else if (n == 0) {
@@ -262,79 +268,139 @@ void o_read_nb(fd_set *read_fds) {
              neighbors[i].id, fd);
       clear_slot(i);
     } else {
-      buffer[n] = '\0';
+      size_t current_len = global_rx_lengths[i];
+      if ((size_t)n > RX_BUFFER_SIZE - current_len - 1) {
+        fprintf(stderr,
+                "Receive buffer overflow from neighbor %s. Closing edge (FD: "
+                "%d).\n",
+                neighbors[i].id, fd);
+        clear_slot(i);
+        continue;
+      }
 
-      char command[32];
-      int id;
+      memcpy(global_rx_buffers[i] + current_len, buffer, (size_t)n);
+      current_len += (size_t)n;
+      global_rx_buffers[i][current_len] = '\0';
 
-      if (sscanf(buffer, "%31s", command) >= 1) {
-        // NEIGHBOUR id[2]
-        if (strcmp(command, "NEIGHBOR") == 0) {
-          
-          if (sscanf(buffer, "%*s %d", &id) == 1) {
-            if (id < 0 || id > 99) {
-              continue;
-            }
+      char *scan = global_rx_buffers[i];
+      char *newline = NULL;
+      while ((newline = (char *)memchr(
+                  scan, '\n',
+                  current_len - (size_t)(scan - global_rx_buffers[i]))) !=
+             NULL) {
+        *newline = '\0';
 
-            int existing_slot = find_slot_by_id(id);
-            if (existing_slot == -1 || existing_slot == i) {
-              format_node_id(neighbors[i].id, id);
-            } else {
-              // Duplicate edge to same neighbor: keep current and close redundant one
-              // FIX C: Use clear_slot() instead of manual close to ensure proper cleanup
-              // and avoid double-close issues
-              clear_slot(existing_slot);
-              format_node_id(neighbors[i].id, id);
+        char line[512];
+        size_t line_len = (size_t)(newline - scan);
+        if (line_len >= sizeof(line)) {
+          line_len = sizeof(line) - 1;
+        }
+        memcpy(line, scan, line_len);
+        line[line_len] = '\0';
+
+        if (line_len > 0 && line[line_len - 1] == '\r') {
+          line[line_len - 1] = '\0';
+        }
+
+        process_line_from_neighbor(i, line);
+        scan = newline + 1;
+      }
+
+      size_t remaining = current_len - (size_t)(scan - global_rx_buffers[i]);
+      if (remaining > 0) {
+        memmove(global_rx_buffers[i], scan, remaining);
+      }
+      global_rx_lengths[i] = remaining;
+      global_rx_buffers[i][remaining] = '\0';
+    }
+  }
+}
+
+static void process_line_from_neighbor(int slot, const char *line) {
+  char command[32];
+  int id;
+
+  if (sscanf(line, "%31s", command) != 1) {
+    return;
+  }
+
+  if (strcmp(command, "NEIGHBOR") == 0) {
+    if (sscanf(line, "%*s %d", &id) == 1) {
+      if (id < 0 || id > 99) {
+        return;
+      }
+
+      int existing_slot = find_slot_by_id(id);
+      if (existing_slot == -1 || existing_slot == slot) {
+        format_id(neighbors[slot].id, id);
+      } else {
+        clear_slot(existing_slot);
+        format_id(neighbors[slot].id, id);
+      }
+
+      char neighbor_id[64];
+      snprintf(neighbor_id, sizeof(neighbor_id), "%02d", id);
+      add_route(&my_node, neighbor_id, neighbor_id, 1);
+      broadcast_routes(&my_node);
+
+      printf("Successfully established edge with Node %02d!\n", id);
+    }
+  } else if (strcmp(command, "ROUTE") == 0) {
+    int dest_num, cost;
+    char dest[3];
+    if (sscanf(line, "%*s %d %d", &dest_num, &cost) == 2 &&
+        format_id(dest, dest_num) == 0) {
+      printf("Neighbor %s announced route: dest=%s cost=%d\n",
+             neighbors[slot].id, dest, cost);
+      monitor_log("[MONITOR] Overlay received ROUTE %s cost=%d from %s\n", dest,
+                  cost, neighbors[slot].id);
+      process_route(&my_node, neighbors[slot].id, dest, cost);
+    }
+  } else if (strcmp(command, "COORD") == 0) {
+    int dest_num;
+    char dest[3];
+    if (sscanf(line, "%*s %d", &dest_num) == 1 &&
+        format_id(dest, dest_num) == 0) {
+      monitor_log("[MONITOR] Overlay received COORD %s from %s\n", dest,
+                  neighbors[slot].id);
+      process_coord_msg(&my_node, neighbors[slot].id, dest);
+    }
+  } else if (strcmp(command, "UNCOORD") == 0) {
+    int dest_num;
+    char dest[3];
+    if (sscanf(line, "%*s %d", &dest_num) == 1 &&
+        format_id(dest, dest_num) == 0) {
+      monitor_log("[MONITOR] Overlay received UNCOORD %s from %s\n", dest,
+                  neighbors[slot].id);
+      process_uncoord_msg(&my_node, neighbors[slot].id, dest);
+    }
+  } else if (strcmp(command, "CHAT") == 0) {
+    int dest_num;
+    char dest[3], msg[256];
+    if (sscanf(line, "%*s %d %255[^\n]", &dest_num, msg) == 2 &&
+        format_id(dest, dest_num) == 0) {
+      monitor_log("[MONITOR] Overlay received CHAT to %s: %s\n", dest, msg);
+      if (strcmp(dest, my_node.id) == 0) {
+        printf("Chat received: %s\n", msg);
+      } else {
+        char *next_hop = get_next_hop(&my_node, dest);
+        if (next_hop) {
+          int sock = -1;
+          for (int j = 0; j < MAX_NODES; j++) {
+            if (neighbors[j].fd != -1 &&
+                strcmp(neighbors[j].id, next_hop) == 0) {
+              sock = neighbors[j].fd;
+              break;
             }
-            // printf("Successfully established edge with Node %02d!\n", id);
           }
-        } else if (strcmp(command, "ROUTE") == 0) {
-          char dest[64];
-          int cost;
-          if (sscanf(buffer, "%*s %63s %d", dest, &cost) == 2) {
-            monitor_log("[MONITOR] Overlay received ROUTE %s cost=%d from %s\n", dest, cost, neighbors[i].id);
-            process_route(&my_node, neighbors[i].id, dest, cost);
+          if (sock != -1) {
+            send_chat(sock, dest, msg);
           }
-        } else if (strcmp(command, "COORD") == 0) {
-          char dest[64];
-          if (sscanf(buffer, "%*s %63s", dest) == 1) {
-            monitor_log("[MONITOR] Overlay received COORD %s from %s\n", dest, neighbors[i].id);
-            process_coord_msg(&my_node, neighbors[i].id, dest);
-          }
-        } else if (strcmp(command, "UNCOORD") == 0) {
-          char dest[64];
-          if (sscanf(buffer, "%*s %63s", dest) == 1) {
-            monitor_log("[MONITOR] Overlay received UNCOORD %s from %s\n", dest, neighbors[i].id);
-            process_uncoord_msg(&my_node, neighbors[i].id, dest);
-          }
-        } else if (strcmp(command, "CHAT") == 0) {
-          char dest[64], msg[256];
-          if (sscanf(buffer, "%*s %63s %255[^\n]", dest, msg) == 2) {
-            monitor_log("[MONITOR] Overlay received CHAT to %s: %s\n", dest, msg);
-            if (strcmp(dest, my_node.id) == 0) {
-              printf("Chat received: %s\n", msg);
-            } else {
-              // Forward
-              char *next_hop = get_next_hop(&my_node, dest);
-              if (next_hop) {
-                int sock = -1;
-                for (int j = 0; j < MAX_NODES; j++) {
-                  if (neighbors[j].fd != -1 && strcmp(neighbors[j].id, next_hop) == 0) {
-                    sock = neighbors[j].fd;
-                    break;
-                  }
-                }
-                if (sock != -1) {
-                  send_chat(sock, dest, msg);
-                }
-              }
-            }
-          }
-        } else {
-          // printf("Received unknown message from neighbor: %s\n", buffer);
         }
       }
     }
+  } else {
+    printf("Received unknown message from neighbor: %s\n", line);
   }
 }
 
@@ -381,7 +447,7 @@ static int find_free_slot(void) {
 
 static int find_slot_by_id(int id) {
   char id_str[3];
-  if (format_node_id(id_str, id) != 0) {
+  if (format_id(id_str, id) != 0) {
     return -1;
   }
   for (int i = 0; i < MAX_NODES; i++) {
@@ -411,15 +477,5 @@ static void clear_slot(int slot) {
   neighbors[slot].fd = -1;
   memset(neighbors[slot].ip, 0, sizeof(neighbors[slot].ip));
   memset(neighbors[slot].tcp, 0, sizeof(neighbors[slot].tcp));
-}
-
-static int format_node_id(char out[3], int id) {
-  if (id < 0 || id > 99) {
-    return -1;
-  }
-
-  out[0] = (char)('0' + (id / 10));
-  out[1] = (char)('0' + (id % 10));
-  out[2] = '\0';
-  return 0;
+  global_rx_lengths[slot] = 0;
 }

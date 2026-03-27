@@ -68,6 +68,7 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
       config->id = id;
       printf("Joining network %03d as node %02d...\n", net, id);
       ns_send_reg(udp_fd, 0, net, id, config->IP, config->TCP);
+      
       // Initialize routing
       char my_id_str[3];
       sprintf(my_id_str, "%02d", id);
@@ -165,8 +166,8 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
       config->net = net;
       config->id = id;
       printf("Directly joined network %03d as node %02d (No Node Server "
-             "registration).\n",
-             net, id);
+             "registration).\n", net, id);
+
       // Initialize routing
       char my_id_str[3];
       sprintf(my_id_str, "%02d", id);
@@ -207,9 +208,15 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
 
   // 11. SHOW ROUTING: show routing (sr) dest
   else if (strcmp(command, "sr") == 0 || strncmp(input, "show routing", 12) == 0) {
-    char dest[64];
-    if (sscanf(input, "%*s %63s", dest) == 1 ||
-        sscanf(input, "show routing %63s", dest) == 1) {
+    int dest_num;
+    char dest[3];
+    if (sscanf(input, "%*s %d", &dest_num) == 1 ||
+        sscanf(input, "show routing %d", &dest_num) == 1) {
+      if (format_id(dest, dest_num) != 0) {
+        printf("Invalid destination id. Use values between 00 and 99.\n");
+        return;
+      }
+
       Route *r = find_route(&my_node, dest);
       if (r) {
         printf("Route to %s: Next hop %s, Cost %d, State %s\n",
@@ -225,9 +232,15 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
 
   // 12. MESSAGE: message (m) dest text
   else if (strcmp(command, "m") == 0 || strncmp(input, "message", 7) == 0) {
-    char dest[64], msg[256];
-    if (sscanf(input, "%*s %63s %255[^\n]", dest, msg) == 2 ||
-        sscanf(input, "message %63s %255[^\n]", dest, msg) == 2) {
+    int dest_num;
+    char dest[3], msg[256];
+    if (sscanf(input, "%*s %d %255[^\n]", &dest_num, msg) == 2 ||
+        sscanf(input, "message %d %255[^\n]", &dest_num, msg) == 2) {
+      if (format_id(dest, dest_num) != 0) {
+        printf("Invalid destination id. Use values between 00 and 99.\n");
+        return;
+      }
+
       // Find next hop
       char *next_hop = get_next_hop(&my_node, dest);
       if (next_hop) {

@@ -11,6 +11,9 @@
 
 #define MAX_NODES 100
 
+int send_msg(int fd, const char *msg);
+int format_id(char out[3], int id);
+
 typedef struct {
   char id[3];
   int fd;

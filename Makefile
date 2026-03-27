@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -std=c99 -pedantic -g -DDEBUG -Wall -Wextra -Werror -Wwrite-strings
 OPTLVL = 3
-TARGET = owr
+TARGET = OWR
 
 $(TARGET):
 	$(CC) main.c src/*.c -o $(TARGET) -O$(OPTLVL) $(CFLAGS)
