@@ -75,6 +75,15 @@ int o_tcp_listener_init(const char *ip, const char *port) {
     exit(1);
   }
 
+  int optval = 1;
+  if (setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &optval,
+                 sizeof(optval)) == -1) {
+    perror("Error setting SO_REUSEADDR");
+    close(listen_fd);
+    freeaddrinfo(res);
+    exit(1);
+  }
+
   if (bind(listen_fd, res->ai_addr, res->ai_addrlen) == -1) {
     perror("Error binding listening socket");
     exit(1);

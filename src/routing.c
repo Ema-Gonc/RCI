@@ -79,7 +79,18 @@ void node_init(Node *node, char *id, const char *ip, int port) {
   (void)ip;
   (void)port;
   node->neighbor_count = 0;
-  node->route_count = 0;
+
+  node->route_count = MAX_NODES;
+  for (int i = 0; i < MAX_NODES; i++) {
+    char dest_id[3];
+    format_id(dest_id, i);
+    set_text(node->routes[i].dest, sizeof(node->routes[i].dest), dest_id);
+    node->routes[i].cost = INF;
+    set_text(node->routes[i].next, sizeof(node->routes[i].next), "-1");
+    node->routes[i].state = STATE_EXPEDITION;
+    set_text(node->routes[i].succ_coord, sizeof(node->routes[i].succ_coord), "-1");
+    memset(node->routes[i].coord_pending, 0, sizeof(node->routes[i].coord_pending));
+  }
 }
 
 void add_neighbor(Node *node, char *id, char *ip, int port) {
