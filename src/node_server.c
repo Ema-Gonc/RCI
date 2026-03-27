@@ -143,12 +143,7 @@ void ns_handle_response(int udp_fd, const AppConfig *config) {
   buffer[n] = '\0';
 
   if (config && config->monitor) {
-    printf("[MONITOR] Node Server response: %s\n", buffer);
-    FILE *f = fopen("/tmp/owr_monitor.log", "a");
-    if (f) {
-      fprintf(f, "[MONITOR] Node Server response: %s\n", buffer);
-      fclose(f);
-    }
+    monitor_log("[MONITOR] RX NS: %s\n", buffer);
   }
 
   char command[9]; // Max length is 7 + null terminator so we consider one more

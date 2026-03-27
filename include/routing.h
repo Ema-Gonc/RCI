@@ -21,7 +21,7 @@ void node_init(Node *node, char *id, const char *ip, int port);
 void add_neighbor(Node *node, char *id, char *ip, int port);
 Route *find_route(Node *node, char *dest);
 int add_route(Node *node, char *dest, char *next, int cost);
-char *get_next_hop(Node *node, char *dest);
+char *get_succ(Node *node, char *dest);
 void print_routes(Node *node);
 void send_chat(int sock, char *dest, char *msg);
 void send_route_update(int sock, char *dest, int cost);

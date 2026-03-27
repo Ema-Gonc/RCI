@@ -73,7 +73,6 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
       char my_id_str[3];
       sprintf(my_id_str, "%02d", id);
       node_init(&my_node, my_id_str, "", 0);
-      broadcast_routes(&my_node);
     } else {
       printf("Usage: join <net> <id>\n");
     }
@@ -172,7 +171,6 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
       char my_id_str[3];
       sprintf(my_id_str, "%02d", id);
       node_init(&my_node, my_id_str, "", 0);
-      broadcast_routes(&my_node);
     } else {
       printf("Usage: direct join <net> <id>\n");
     }
@@ -202,8 +200,10 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
       printf("Error: You must join a network first.\n");
       return;
     }
+
+    add_route(&my_node, my_node.id, my_node.id, 0);
     broadcast_routes(&my_node);
-    printf("Routes announced to all neighbors.\n");
+    printf("Node %s announced as destination.\n", my_node.id);
   }
 
   // 11. SHOW ROUTING: show routing (sr) dest
@@ -219,7 +219,7 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
 
       Route *r = find_route(&my_node, dest);
       if (r) {
-        printf("Route to %s: Next hop %s, Cost %d, State %s\n",
+        printf("Route to %s: Succ %s, Cost %d, State %s\n",
                dest, r->next, r->cost,
                (r->state == 0) ? "EXPEDITION" : "COORDINATION");
       } else {
@@ -241,22 +241,27 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
         return;
       }
 
-      // Find next hop
-      char *next_hop = get_next_hop(&my_node, dest);
-      if (next_hop) {
-        // Find socket for next_hop
+      if (strlen(msg) > 128) {
+        printf("Message too long. Maximum length is 128 characters.\n");
+        return;
+      }
+
+      // Find successor
+      char *succ = get_succ(&my_node, dest);
+      if (succ) {
+        // Find socket for successor
         int sock = -1;
         for (int i = 0; i < MAX_NODES; i++) {
-          if (neighbors[i].fd != -1 && strcmp(neighbors[i].id, next_hop) == 0) {
+          if (neighbors[i].fd != -1 && strcmp(neighbors[i].id, succ) == 0) {
             sock = neighbors[i].fd;
             break;
           }
         }
         if (sock != -1) {
           send_chat(sock, dest, msg);
-          printf("Message sent to %s via %s\n", dest, next_hop);
+          printf("Message sent to %s via succ %s\n", dest, succ);
         } else {
-          printf("No active connection to next hop %s\n", next_hop);
+          printf("No active connection to succ %s\n", succ);
         }
       } else {
         printf("No route to %s\n", dest);

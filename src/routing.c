@@ -1,70 +1,17 @@
 #include "../include/routing.h"
 #include "../include/common.h"
-#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 #define STATE_EXPEDITION 0
 #define STATE_COORDINATION 1
 #define INF 999
 
 extern Neighbor neighbors[MAX_NODES];
-extern AppConfig config;
 
 static void check_coordination_end(Node *node, Route *r);
 static int find_neighbor_slot_by_id(const char *id);
 static void set_text(char *dest, size_t size, const char *src);
-
-int send_msg(int fd, const char *msg) {
-  size_t len = strlen(msg);
-  const char *ptr = msg;
-
-  while (len > 0) {
-    ssize_t written = write(fd, ptr, len);
-    if (written <= 0) {
-      return -1;
-    }
-    ptr += written;
-    len -= (size_t)written;
-  }
-
-  return 0;
-}
-
-int format_id(char out[3], int id) {
-  if (id < 0 || id > 99) {
-    return -1;
-  }
-
-  out[0] = (char)('0' + (id / 10));
-  out[1] = (char)('0' + (id % 10));
-  out[2] = '\0';
-  return 0;
-}
-
-static void monitor_log(const char *format, ...) {
-  if (!config.monitor)
-    return;
-
-  va_list console_args;
-  va_start(console_args, format);
-
-  va_list file_args;
-  va_copy(file_args, console_args);
-
-  vprintf(format, console_args);
-  fflush(stdout);
-  va_end(console_args);
-
-  FILE *f = fopen("/tmp/owr_monitor.log", "a");
-  if (f) {
-    vfprintf(f, format, file_args);
-    fclose(f);
-  }
-
-  va_end(file_args);
-}
 
 static void set_text(char *dest, size_t size, const char *src) {
   if (size == 0)
@@ -133,13 +80,6 @@ void node_init(Node *node, char *id, const char *ip, int port) {
   (void)port;
   node->neighbor_count = 0;
   node->route_count = 0;
-  add_route(node, node->id, node->id, 0);
-
-  for (int i = 0; i < MAX_NODES; i++) {
-    if (neighbors[i].fd != -1 && strcmp(neighbors[i].id, "-1") != 0) {
-      add_route(node, neighbors[i].id, neighbors[i].id, 1);
-    }
-  }
 }
 
 void add_neighbor(Node *node, char *id, char *ip, int port) {
@@ -149,7 +89,7 @@ void add_neighbor(Node *node, char *id, char *ip, int port) {
   (void)port;
 }
 
-char *get_next_hop(Node *node, char *dest) {
+char *get_succ(Node *node, char *dest) {
   Route *r = find_route(node, dest);
   if (r) {
     return r->next;
@@ -171,23 +111,24 @@ void print_routes(Node *node) {
 
 void send_chat(int sock, char *dest, char *msg) {
   char buffer[512];
-  snprintf(buffer, sizeof(buffer), "CHAT %s %s\n", dest, msg);
-  monitor_log("[MONITOR] Send CHAT to %s: %s\n", dest, msg);
+  char clipped_msg[129];
+  strncpy(clipped_msg, msg, 128);
+  clipped_msg[128] = '\0';
+
+  snprintf(buffer, sizeof(buffer), "CHAT %s %s\n", dest, clipped_msg);
+  monitor_log("[MONITOR] TX: %s", buffer);
   send_msg(sock, buffer);
 }
 
 void send_route_update(int sock, char *dest, int cost) {
   char buffer[256];
   snprintf(buffer, sizeof(buffer), "ROUTE %s %d\n", dest, cost);
-  monitor_log("[MONITOR] Send ROUTE %s cost=%d\n", dest, cost);
+  monitor_log("[MONITOR] TX: %s", buffer);
   send_msg(sock, buffer);
 }
 
 void process_route(Node *node, char *neighbor, char *dest, int cost) {
   int new_cost = cost + 1;
-  monitor_log(
-      "[MONITOR] Received ROUTE from %s: dest=%s cost=%d (new_cost=%d)\n",
-      neighbor, dest, cost, new_cost);
 
   Route *r = find_route(node, dest);
   int was_in_coordination = (r && r->state == STATE_COORDINATION) ? 1 : 0;
@@ -218,12 +159,10 @@ void broadcast_routes(Node *node) {
 
     snprintf(msg, sizeof(msg), "ROUTE %s %d\n", node->routes[r].dest,
              node->routes[r].cost);
-    monitor_log("[MONITOR] Broadcast ROUTE %s cost=%d (state=EXPEDITION) to "
-                "all neighbors\n",
-                node->routes[r].dest, node->routes[r].cost);
 
     for (int i = 0; i < MAX_NODES; i++) {
       if (neighbors[i].fd > 0) {
+        monitor_log("[MONITOR] TX to %s: %s", neighbors[i].id, msg);
         send_msg(neighbors[i].fd, msg);
       }
     }
@@ -238,6 +177,7 @@ void send_routes(Node *node) {
 
     for (int i = 0; i < MAX_NODES; i++) {
       if (neighbors[i].fd > 0) {
+        monitor_log("[MONITOR] TX to %s: %s", neighbors[i].id, buffer);
         send_msg(neighbors[i].fd, buffer);
       }
     }
@@ -278,9 +218,6 @@ void process_coord_msg(Node *node, char *j, char *t) {
   Route *r = find_route(node, t);
   if (!r)
     return;
-  monitor_log("[MONITOR] Received COORD from %s: dest=%s (my state=%s)\n", j,
-              t,
-              (r->state == STATE_EXPEDITION) ? "EXPEDITION" : "COORDINATION");
   if (r->state == STATE_COORDINATION) {
     send_uncoord(node, j, t);
   } else if (r->state == STATE_EXPEDITION && strcmp(j, r->next) != 0) {
@@ -306,10 +243,9 @@ void process_coord_msg(Node *node, char *j, char *t) {
 void send_coord(Node *node, char *target_id, char *dest) {
   char msg[128];
   snprintf(msg, sizeof(msg), "COORD %s\n", dest);
-  monitor_log("[MONITOR] Send COORD %s to node %s\n", dest,
-              target_id);
   for (int i = 0; i < MAX_NODES; i++) {
     if (neighbors[i].fd > 0 && strcmp(neighbors[i].id, target_id) == 0) {
+      monitor_log("[MONITOR] TX to %s: %s", target_id, msg);
       send_msg(neighbors[i].fd, msg);
     }
   }
@@ -319,10 +255,9 @@ void send_coord(Node *node, char *target_id, char *dest) {
 void send_uncoord(Node *node, char *target_id, char *dest) {
   char msg[128];
   snprintf(msg, sizeof(msg), "UNCOORD %s\n", dest);
-  monitor_log("[MONITOR] Send UNCOORD %s to node %s\n", dest,
-              target_id);
   for (int i = 0; i < MAX_NODES; i++) {
     if (neighbors[i].fd > 0 && strcmp(neighbors[i].id, target_id) == 0) {
+      monitor_log("[MONITOR] TX to %s: %s", target_id, msg);
       send_msg(neighbors[i].fd, msg);
     }
   }
@@ -335,6 +270,7 @@ void send_route_to_id(Node *node, char *target_id, char *dest, int cost) {
 
   for (int i = 0; i < MAX_NODES; i++) {
     if (neighbors[i].fd > 0 && strcmp(neighbors[i].id, target_id) == 0) {
+      monitor_log("[MONITOR] TX to %s: %s", target_id, msg);
       send_msg(neighbors[i].fd, msg);
       return;
     }
@@ -370,6 +306,5 @@ void process_uncoord_msg(Node *node, char *j, char *t) {
   if (slot != -1) {
     r->coord_pending[slot] = 0;
   }
-  monitor_log("[MONITOR] Received UNCOORD from neighbor: dest=%s\n", t);
   check_coordination_end(node, r);
 }

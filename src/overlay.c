@@ -19,7 +19,6 @@
 
 #include <errno.h>
 #include <netdb.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,19 +27,6 @@
 #include <unistd.h>
 
 Neighbor neighbors[MAX_NODES];
-
-// External config for monitoring
-extern AppConfig config;
-
-// Helper function to log messages if monitoring enabled
-static void monitor_log(const char *format, ...) {
-  if (config.monitor) {
-    va_list args;
-    va_start(args, format);
-    vprintf(format, args);
-    va_end(args);
-  }
-}
 
 static char global_local_ip[64] = {0};
 static char global_local_tcp[32] = {0};
@@ -55,6 +41,7 @@ static int find_free_slot(void);
 static int find_slot_by_id(int id);
 static void clear_slot(int slot);
 static void process_line_from_neighbor(int slot, const char *line);
+static void send_known_routes_to_neighbor(const char *neighbor_id);
 
 int o_tcp_listener_init(const char *ip, const char *port) {
   struct addrinfo hints, *res;
@@ -177,6 +164,7 @@ int o_connect_out(const char *target_ip, const char *target_port, int target_id,
 
   char msg[64];
   snprintf(msg, sizeof(msg), "NEIGHBOR %02d\n", my_id);
+  monitor_log("[MONITOR] TX: %s", msg);
 
   if (send_msg(edge_fd, msg) != 0) {
     perror("Error sending NEIGHBOR message");
@@ -235,16 +223,10 @@ void o_add_nb(int id, int fd, const char *ip, const char *tcp) {
     neighbors[slot].tcp[sizeof(neighbors[slot].tcp) - 1] = '\0';
   }
 
-  // Create direct route to this neighbor (cost = 1) before broadcasting
-  // This ensures the routing invariant: if neighbor exists, route must exist
-  char neighbor_id[64];
-  snprintf(neighbor_id, sizeof(neighbor_id), "%02d", id);
-  add_route(&my_node, neighbor_id, neighbor_id, 1);
-
-  // Automatically announce current routing table after establishing an edge.
-  // This ensures any new neighbor receives the routing state immediately,
-  // including the route to this newly established neighbor.
-  broadcast_routes(&my_node);
+  char neighbor_id[3];
+  if (format_id(neighbor_id, id) == 0) {
+    send_known_routes_to_neighbor(neighbor_id);
+  }
 }
 
 void o_read_nb(fd_set *read_fds) {
@@ -324,6 +306,8 @@ static void process_line_from_neighbor(int slot, const char *line) {
     return;
   }
 
+  monitor_log("[MONITOR] RX from %s: %s\n", neighbors[slot].id, line);
+
   if (strcmp(command, "NEIGHBOR") == 0) {
     if (sscanf(line, "%*s %d", &id) == 1) {
       if (id < 0 || id > 99) {
@@ -338,10 +322,10 @@ static void process_line_from_neighbor(int slot, const char *line) {
         format_id(neighbors[slot].id, id);
       }
 
-      char neighbor_id[64];
-      snprintf(neighbor_id, sizeof(neighbor_id), "%02d", id);
-      add_route(&my_node, neighbor_id, neighbor_id, 1);
-      broadcast_routes(&my_node);
+      char neighbor_id[3];
+      if (format_id(neighbor_id, id) == 0) {
+        send_known_routes_to_neighbor(neighbor_id);
+      }
 
       printf("Successfully established edge with Node %02d!\n", id);
     }
@@ -352,8 +336,6 @@ static void process_line_from_neighbor(int slot, const char *line) {
         format_id(dest, dest_num) == 0) {
       printf("Neighbor %s announced route: dest=%s cost=%d\n",
              neighbors[slot].id, dest, cost);
-      monitor_log("[MONITOR] Overlay received ROUTE %s cost=%d from %s\n", dest,
-                  cost, neighbors[slot].id);
       process_route(&my_node, neighbors[slot].id, dest, cost);
     }
   } else if (strcmp(command, "COORD") == 0) {
@@ -361,8 +343,6 @@ static void process_line_from_neighbor(int slot, const char *line) {
     char dest[3];
     if (sscanf(line, "%*s %d", &dest_num) == 1 &&
         format_id(dest, dest_num) == 0) {
-      monitor_log("[MONITOR] Overlay received COORD %s from %s\n", dest,
-                  neighbors[slot].id);
       process_coord_msg(&my_node, neighbors[slot].id, dest);
     }
   } else if (strcmp(command, "UNCOORD") == 0) {
@@ -370,25 +350,25 @@ static void process_line_from_neighbor(int slot, const char *line) {
     char dest[3];
     if (sscanf(line, "%*s %d", &dest_num) == 1 &&
         format_id(dest, dest_num) == 0) {
-      monitor_log("[MONITOR] Overlay received UNCOORD %s from %s\n", dest,
-                  neighbors[slot].id);
       process_uncoord_msg(&my_node, neighbors[slot].id, dest);
     }
   } else if (strcmp(command, "CHAT") == 0) {
     int dest_num;
-    char dest[3], msg[256];
-    if (sscanf(line, "%*s %d %255[^\n]", &dest_num, msg) == 2 &&
+    char dest[3], msg_raw[512], msg[129];
+    if (sscanf(line, "%*s %d %511[^\n]", &dest_num, msg_raw) == 2 &&
         format_id(dest, dest_num) == 0) {
-      monitor_log("[MONITOR] Overlay received CHAT to %s: %s\n", dest, msg);
+      strncpy(msg, msg_raw, 128);
+      msg[128] = '\0';
+
       if (strcmp(dest, my_node.id) == 0) {
         printf("Chat received: %s\n", msg);
       } else {
-        char *next_hop = get_next_hop(&my_node, dest);
-        if (next_hop) {
+        char *succ = get_succ(&my_node, dest);
+        if (succ) {
           int sock = -1;
           for (int j = 0; j < MAX_NODES; j++) {
             if (neighbors[j].fd != -1 &&
-                strcmp(neighbors[j].id, next_hop) == 0) {
+                strcmp(neighbors[j].id, succ) == 0) {
               sock = neighbors[j].fd;
               break;
             }
@@ -456,6 +436,20 @@ static int find_slot_by_id(int id) {
     }
   }
   return -1;
+}
+
+static void send_known_routes_to_neighbor(const char *neighbor_id) {
+  for (int r = 0; r < my_node.route_count; r++) {
+    if (my_node.routes[r].state != 0) {
+      continue;
+    }
+    if (my_node.routes[r].cost >= 999) {
+      continue;
+    }
+
+    send_route_to_id(&my_node, (char *)neighbor_id, my_node.routes[r].dest,
+                     my_node.routes[r].cost);
+  }
 }
 
 static void clear_slot(int slot) {

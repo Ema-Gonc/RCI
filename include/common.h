@@ -13,6 +13,7 @@
 
 int send_msg(int fd, const char *msg);
 int format_id(char out[3], int id);
+void monitor_log(const char *format, ...);
 
 typedef struct {
   char id[3];
