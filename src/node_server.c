@@ -1,15 +1,5 @@
-/*
- * Este código implementa um nó de rede distribuído com as seguintes capacidades:
- * - Comunicação UDP: Gestão de registo (REG), descoberta de nós (NODES) e pedidos de contacto (CONTACT) junto do servidor central.
- * - Gestão de Overlay: Estabelecimento de sessões TCP, aceitação de novos vizinhos e monitorização ativa de falhas de ligação.
- * - Encaminhamento Dinâmico: Protocolo de Vetor de Distância para propagação de destinos e custos (saltos) entre nós.
- * - Prevenção de Loops: Mecanismo de coordenação/expedição para bloquear rotas instáveis e evitar ciclos em caso de falha.
- * - Serviço de Mensagens: Sistema de encaminhamento (forwarding) de chat "hop-by-hop" baseado no próximo salto da tabela de rotas.
- * - Multiplexagem de E/S: Uso do 'select' para processar em simultâneo comandos do terminal e múltiplas ligações de rede.
- */
-
-
 #define _GNU_SOURCE
+
 #include "../include/node_server.h"
 #include "../include/common.h"
 #include "../include/overlay.h"
@@ -20,9 +10,66 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 static struct addrinfo *g_server_info = NULL;
+
+#define NS_MAX_PENDING 16
+#define NS_TIMEOUT_SEC 3
+
+typedef struct {
+  int active;
+  int tid;
+  char command[16];
+  time_t sent_at;
+} PendingTx;
+
+static PendingTx g_pending[NS_MAX_PENDING];
+
+static void track_pending_tx(const char *command, int tid) {
+  int slot = -1;
+  for (int i = 0; i < NS_MAX_PENDING; i++) {
+    if (!g_pending[i].active) {
+      slot = i;
+      break;
+    }
+  }
+
+  if (slot == -1) {
+    slot = 0;
+  }
+
+  g_pending[slot].active = 1;
+  g_pending[slot].tid = tid;
+  snprintf(g_pending[slot].command, sizeof(g_pending[slot].command), "%s",
+           command);
+  g_pending[slot].sent_at = time(NULL);
+}
+
+static void clear_pending_tx(int tid) {
+  for (int i = 0; i < NS_MAX_PENDING; i++) {
+    if (g_pending[i].active && g_pending[i].tid == tid) {
+      g_pending[i].active = 0;
+      return;
+    }
+  }
+}
+
+void ns_tick(void) {
+  time_t now = time(NULL);
+  for (int i = 0; i < NS_MAX_PENDING; i++) {
+    if (!g_pending[i].active) {
+      continue;
+    }
+
+    if ((now - g_pending[i].sent_at) >= NS_TIMEOUT_SEC) {
+      printf("Timeout waiting Node Server response for %s (Transaction: %03d)\n",
+             g_pending[i].command, g_pending[i].tid);
+      g_pending[i].active = 0;
+    }
+  }
+}
 
 int ns_udp_init(const char *regIP, const char *regUDP) {
   struct addrinfo hints;
@@ -83,7 +130,8 @@ int ns_send_reg(int udp_fd, int op, int net, int id, const char *node_ip,
     return -1;
   }
 
-  // printf("-> %s", buffer);
+  track_pending_tx("REG", tid);
+
   return tid;
 }
 
@@ -108,7 +156,8 @@ int ns_send_nodes(int udp_fd, int net) {
     return -1;
   }
 
-  // printf("-> %s", buffer);
+  track_pending_tx("NODES", tid);
+
   return tid;
 }
 
@@ -117,6 +166,12 @@ int ns_send_contact(int udp_fd, int net, int target_id) {
   char buffer[128];
   int tid = rand() % 1000; // random tid
 
+  if (g_server_info == NULL) {
+    fprintf(stderr,
+            "Node Server address not initialized. Call ns_udp_init first.\n");
+    return -1;
+  }
+
   sprintf(buffer, "CONTACT %03d 0 %03d %02d\n", tid, net, target_id);
   if (sendto(udp_fd, buffer, strlen(buffer), 0, g_server_info->ai_addr,
              g_server_info->ai_addrlen) == -1) {
@@ -124,7 +179,8 @@ int ns_send_contact(int udp_fd, int net, int target_id) {
     return -1;
   }
 
-  // printf("-> %s", buffer);
+  track_pending_tx("CONTACT", tid);
+
   return tid;
 }
 
@@ -146,13 +202,11 @@ void ns_handle_response(int udp_fd, const AppConfig *config) {
     monitor_log("[MONITOR] RX NS: %s\n", buffer);
   }
 
-  char command[9]; // Max length is 7 + null terminator so we consider one more
-                   // to differentiate from wrongful commands
+  char command[9]; // Longest expected command is "CONTACT".
   int tid, op;
 
-  // printf("<- %s\n", buffer);
-
   if (sscanf(buffer, "%8s %d %d", command, &tid, &op) >= 3) {
+    clear_pending_tx(tid);
 
     // Handle REG responses
     if (strcmp(command, "REG") == 0) {

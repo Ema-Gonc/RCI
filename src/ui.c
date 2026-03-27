@@ -1,29 +1,14 @@
-
-
-/*
- * Módulo de Interface de Utilizador (UI):
- * - Processamento e parsing de comandos interativos via terminal (STDIN).
- * - Gestão de estados de adesão (Join/Leave/Exit) e registo no servidor central.
- * - Comandos de exploração de rede: listagem de nós ativos e detalhes de vizinhança.
- * - Manipulação de topologia (Edges): adição e remoção de ligações TCP entre nós.
- * - Suporte a operações diretas: configuração de ID e conexões bypass ao servidor.
- * - Sistema de ajuda e validação de argumentos para interação robusta com o utilizador.
- */
-
-
 #include "../include/ui.h"
 #include "../include/common.h"
 #include "../include/node_server.h"
 #include "../include/overlay.h"
 #include "../include/routing.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-//#include "routing.h" // Uncomment when routing is implemented
-// #include "chat.h"    // Uncomment when chat is implemented
 
 extern Neighbor neighbors[MAX_NODES];
-
 extern Node my_node;
 
 static void ui_leave_network(AppConfig *config, int udp_fd, int verbose);
@@ -142,7 +127,7 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
     }
   }
 
-  // 7. SHOW NEIGHBORS: show neighbors (sn)
+  // 7. SHOW NEIGHBORS: show neighbors (sg)
   else if (strcmp(command, "sg") == 0 ||
            (strncmp(input, "show neighbors", 14) == 0)) {
     printf("Active Neighbors:\n");
@@ -312,16 +297,12 @@ static void ui_leave_network(AppConfig *config, int udp_fd, int verbose) {
     printf("Leaving network %03d...\n", config->net);
   }
 
-  // Send unregister message (op = 3), IP and TCP are omitted
   ns_send_reg(udp_fd, 3, config->net, config->id, "", "");
-
-  // Remove all overlay edges before exiting/leaving.
   o_rm_all_nb();
 
   config->net = -1;
   config->id = -1;
 
-  // Clear routing state.
   my_node.route_count = 0;
   my_node.neighbor_count = 0;
 

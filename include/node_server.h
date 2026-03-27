@@ -12,5 +12,6 @@ int ns_send_nodes(int udp_fd, int net);
 int ns_send_contact(int udp_fd, int net, int target_id);
 
 void ns_handle_response(int udp_fd, const AppConfig *config);
+void ns_tick(void);
 
 #endif

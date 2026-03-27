@@ -1,16 +1,3 @@
-
-/*
- * Módulo de Gestão da Camada Overlay (TCP):
- * - Inicialização de servidor TCP e estabelecimento de conexões ativas com
- * pares.
- * - Implementação do handshake "NEIGHBOR" para troca de identidades entre nós.
- * - Gestão dinâmica da tabela de vizinhos (ID, IP, Porto e File Descriptors).
- * - Tratamento de eventos de rede: aceitação, leitura de dados e fecho de
- * sockets.
- * - Integração com o mecanismo de multiplexagem (select) para monitorização de
- * múltiplos FDs.
- */
-
 #define _GNU_SOURCE
 
 #include "../include/overlay.h"
@@ -468,12 +455,10 @@ static void clear_slot(int slot) {
 
   if (neighbors[slot].fd != -1) {
     // Handle edge failure for routing
-    if (my_node.route_count > 0) {
+    if (my_node.route_count > 0 && strcmp(neighbors[slot].id, "-1") != 0) {
       handle_edge_failure(&my_node, neighbors[slot].id);
     }
     close(neighbors[slot].fd);
-    // printf("Closed connection with Node %s (FD: %d)\n", neighbors[slot].id,
-    //        neighbors[slot].fd);
   }
 
   strcpy(neighbors[slot].id, "-1");

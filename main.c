@@ -1,21 +1,8 @@
-/*
- * Módulo Principal e Ciclo de Eventos (Main Loop):
- * - Ponto de entrada da aplicação OWR, responsável pelo parsing de argumentos e setup inicial.
- * - Orquestração de sockets UDP (Servidor) e TCP (Escuta/Overlay) para operação híbrida.
- * - Implementação de I/O Multiplexing via 'select' para gestão concorrente de eventos.
- * - Encaminhamento de mensagens para os sub-módulos: UI, Node Server e Overlay.
- * - Gestão do estado global da aplicação e encerramento controlado de recursos de rede.
- */
-
 /*----------------------
  | Class: RCI
  | Project: OverlayWithRouting (OWR)
  | Author: André Santos & Ema Gonçalves
  ----------------------*/
-
-/*----------------------
-|  Includes & Defs
------------------------*/
 
 #include "include/common.h"
 #include "include/node_server.h"
@@ -37,8 +24,6 @@
 
 AppConfig config;
 Node my_node;
-
-// TODO: Streamline user interaction and spacings -> \n
 
 static int parse_arguments(int argc, char *const *argv) {
   if (argc < 3 || argc > 5) {
@@ -150,14 +135,21 @@ int main(int argc, char *const *argv) {
   while (1) {
     setup_fds(&read_fds, udp_fd, tcp_listen_fd, &max_fd);
 
-    int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+    struct timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 200000;
+
+    int activity = select(max_fd + 1, &read_fds, NULL, NULL, &tv);
 
     if (activity == -1) {
       perror("Error in select()");
       break;
     }
 
-    handle_events(&read_fds, udp_fd, tcp_listen_fd);
+    if (activity > 0) {
+      handle_events(&read_fds, udp_fd, tcp_listen_fd);
+    }
+    ns_tick();
   }
 
   cleanup(udp_fd, tcp_listen_fd);

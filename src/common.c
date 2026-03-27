@@ -1,5 +1,6 @@
 #include "../include/common.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -12,8 +13,14 @@ int send_msg(int fd, const char *msg) {
   const char *ptr = msg;
 
   while (len > 0) {
-    ssize_t written = write(fd, ptr, len);
-    if (written <= 0) {
+    ssize_t written = send(fd, ptr, len, MSG_NOSIGNAL);
+    if (written < 0) {
+      if (errno == EINTR) {
+        continue;
+      }
+      return -1;
+    }
+    if (written == 0) {
       return -1;
     }
     ptr += written;
