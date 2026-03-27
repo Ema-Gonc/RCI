@@ -1,2 +1,0 @@
-# RCI
-Projeto de RCI

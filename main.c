@@ -40,10 +40,7 @@ Node my_node;
 
 // TODO: Streamline user interaction and spacings -> \n
 
-int main(int argc, char *const *argv) {
-  /*----------------------
-   |  Handle Arguments
-   -----------------------*/
+static int parse_arguments(int argc, char *const *argv) {
   if (argc < 3 || argc > 5) {
     fprintf(
         stderr,
@@ -78,75 +75,92 @@ int main(int argc, char *const *argv) {
     config.regUDP[sizeof(config.regUDP) - 1] = '\0';
   }
 
+  return EXIT_SUCCESS;
+}
+
+static void initialize_config(void) {
   config.net = -1;
-
   config.id = -1;
-
   config.monitor = 0;
-
   o_init_nb();
+}
 
-  int udp_fd = ns_udp_init(config.regIP, config.regUDP);
-  int tcp_listen_fd = o_tcp_listener_init(config.IP, config.TCP);
- 
-  printf("Nó inicializado em %s:%s.\n",
-         config.IP, config.TCP);
-  
+static void setup_fds(fd_set *read_fds, int udp_fd, int tcp_listen_fd, int *max_fd) {
+  FD_ZERO(read_fds);
+  FD_SET(STDIN_FILENO, read_fds);
+  *max_fd = STDIN_FILENO;
 
-  fd_set read_fds;
-  int max_fd;
-
-  while (1) {
-    FD_ZERO(&read_fds);
-
-    FD_SET(STDIN_FILENO, &read_fds);
-    max_fd = STDIN_FILENO;
-
-    if (udp_fd != -1) {
-      FD_SET(udp_fd, &read_fds);
-      if (udp_fd > max_fd)
-        max_fd = udp_fd;
-    }
-
-    if (tcp_listen_fd != -1) {
-      FD_SET(tcp_listen_fd, &read_fds);
-      if (tcp_listen_fd > max_fd)
-        max_fd = tcp_listen_fd;
-    }
-
-    max_fd = check_nb_max_fd(&read_fds, max_fd);
-
-    int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
-
-    if (activity == -1) {
-      perror("Erro em select");
-      break;
-    }
-
-    if (FD_ISSET(STDIN_FILENO, &read_fds)) {
-      char input_buffer[256];
-      if (fgets(input_buffer, sizeof(input_buffer), stdin) != NULL) {
-        ui_process_command(input_buffer, &config, udp_fd);
-      }
-    }
-
-    if (udp_fd != -1 && FD_ISSET(udp_fd, &read_fds)) {
-      ns_handle_response(udp_fd, &config);
-    }
-
-    if (tcp_listen_fd != -1 && FD_ISSET(tcp_listen_fd, &read_fds)) {
-      o_accept_in(tcp_listen_fd);
-    }
-
-    o_read_nb(&read_fds);
+  if (udp_fd != -1) {
+    FD_SET(udp_fd, read_fds);
+    if (udp_fd > *max_fd)
+      *max_fd = udp_fd;
   }
 
+  if (tcp_listen_fd != -1) {
+    FD_SET(tcp_listen_fd, read_fds);
+    if (tcp_listen_fd > *max_fd)
+      *max_fd = tcp_listen_fd;
+  }
+
+  *max_fd = check_nb_max_fd(read_fds, *max_fd);
+}
+
+static void handle_events(fd_set *read_fds, int udp_fd, int tcp_listen_fd) {
+  if (FD_ISSET(STDIN_FILENO, read_fds)) {
+    char input_buffer[256];
+    if (fgets(input_buffer, sizeof(input_buffer), stdin) != NULL) {
+      ui_process_command(input_buffer, &config, udp_fd);
+    }
+  }
+
+  if (udp_fd != -1 && FD_ISSET(udp_fd, read_fds)) {
+    ns_handle_response(udp_fd, &config);
+  }
+
+  if (tcp_listen_fd != -1 && FD_ISSET(tcp_listen_fd, read_fds)) {
+    o_accept_in(tcp_listen_fd);
+  }
+
+  o_read_nb(read_fds);
+}
+
+static void cleanup(int udp_fd, int tcp_listen_fd) {
   if (udp_fd != -1)
     close(udp_fd);
   if (tcp_listen_fd != -1)
     close(tcp_listen_fd);
 
   o_rm_all_nb();
+}
+
+int main(int argc, char *const *argv) {
+  if (parse_arguments(argc, argv) == EXIT_FAILURE)
+    return EXIT_FAILURE;
+
+  initialize_config();
+
+  int udp_fd = ns_udp_init(config.regIP, config.regUDP);
+  int tcp_listen_fd = o_tcp_listener_init(config.IP, config.TCP);
+
+  printf("Node initialized at %s:%s.\n", config.IP, config.TCP);
+
+  fd_set read_fds;
+  int max_fd;
+
+  while (1) {
+    setup_fds(&read_fds, udp_fd, tcp_listen_fd, &max_fd);
+
+    int activity = select(max_fd + 1, &read_fds, NULL, NULL, NULL);
+
+    if (activity == -1) {
+      perror("Error in select()");
+      break;
+    }
+
+    handle_events(&read_fds, udp_fd, tcp_listen_fd);
+  }
+
+  cleanup(udp_fd, tcp_listen_fd);
 
   return EXIT_SUCCESS;
 }

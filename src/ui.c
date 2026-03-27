@@ -26,6 +26,8 @@ extern Neighbor neighbors[MAX_NODES];
 
 extern Node my_node;
 
+static void ui_leave_network(AppConfig *config, int udp_fd, int verbose);
+
 static void ui_print_help(void) {
   printf("Available commands:\n");
   printf("  help | h\n");
@@ -97,30 +99,13 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
 
   // 3. LEAVE: leave (l)
   else if (strcmp(command, "leave") == 0 || strcmp(command, "l") == 0) {
-    if (config->net != -1 && config->id != -1) {
-      printf("Leaving network %03d...\n", config->net);
-      // Send unregister message (op = 3), IP and TCP are omitted
-      ns_send_reg(udp_fd, 3, config->net, config->id, "", "");
-
-      o_rm_all_nb();
-
-      config->net = -1;
-      config->id = -1;
-      // Clear routing table
-      my_node.route_count = 0;
-      my_node.neighbor_count = 0;
-      printf("Successfully left the network and closed all edges.\n");
-    } else {
-      printf("You are not currently in a network.\n");
-    }
+    ui_leave_network(config, udp_fd, 1);
   }
 
   // 4. EXIT: exit (x)
   else if (strcmp(command, "exit") == 0 || strcmp(command, "x") == 0) {
-    if (config->net != -1) {
-      // Auto-leave if currently in a network
-      ns_send_reg(udp_fd, 3, config->net, config->id, "", "");
-    }
+    // Spec behavior: if still joined, perform leave first.
+    ui_leave_network(config, udp_fd, 0);
     printf("Exiting OWR Application. Goodbye!\n");
     exit(0);
   }
@@ -170,32 +155,6 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
     }
     if (count == 0)
       printf(" (No active edges)\n");
-  }
-  // START MONITORING: start monitor (sm)
-  else if (strcmp(command, "sm") == 0 || strcmp(command, "start monitor") == 0) {
-    config->monitor = 1;
-    printf("Monitoramento ativado: logs em /tmp/owr_monitor.log\n");
-    FILE *f = fopen("/tmp/owr_monitor.log", "a");
-    if (f) {
-      fprintf(f, "=== START MONITORING (node %02d) ===\n", config->id);
-      fclose(f);
-    }
-  }
-  // END MONITORING: end monitoring (em)
-  else if (strcmp(command, "em") == 0 || strcmp(command, "end monitor") == 0) {
-    config->monitor = 0;
-    printf("Monitoramento desativado.\n");
-    FILE *f = fopen("/tmp/owr_monitor.log", "a");
-    if (f) {
-      fprintf(f, "=== END MONITORING (node %02d) ===\n", config->id);
-      fclose(f);
-    }
-  }
-
-  // DUMP MONITOR: dm
-  else if (strcmp(command, "dm") == 0 || strcmp(command, "dump monitor") == 0) {
-    printf("Conteúdo do registro de monitor (se existir):\n");
-    system("cat /tmp/owr_monitor.log 2>/dev/null || echo '[nofile]' ");
   }
 
   // 8. DIRECT JOIN: direct join (dj) net id
@@ -298,16 +257,57 @@ void ui_process_command(char *input, AppConfig *config, int udp_fd) {
   else if (strcmp(command, "sm") == 0 || strncmp(input, "start monitor", 13) == 0) {
     config->monitor = 1;
     printf("Routing message monitoring ON.\n");
+    printf("Monitoring ON: logs at /tmp/owr_monitor.log\n");
+    FILE *f = fopen("/tmp/owr_monitor.log", "a");
+    if (f) {
+      fprintf(f, "=== START MONITORING (node %02d) ===\n", config->id);
+      fclose(f);
+    }
   }
 
   // 14. END MONITOR: end monitor (em)
   else if (strcmp(command, "em") == 0 || strncmp(input, "end monitor", 11) == 0) {
     config->monitor = 0;
-    printf("Routing message monitoring OFF.\n");
+    printf("Monitoring OFF.\n");
+    FILE *f = fopen("/tmp/owr_monitor.log", "a");
+    if (f) {
+      fprintf(f, "=== END MONITORING (node %02d) ===\n", config->id);
+      fclose(f);
+    }
   }
 
   // UNKNOWN COMMAND
   else {
     printf("Unknown command: %s\n", command);
+  }
+}
+
+static void ui_leave_network(AppConfig *config, int udp_fd, int verbose) {
+  if (config->net == -1 || config->id == -1) {
+    if (verbose) {
+      printf("You are not currently in a network.\n");
+    }
+    return;
+  }
+
+  if (verbose) {
+    printf("Leaving network %03d...\n", config->net);
+  }
+
+  // Send unregister message (op = 3), IP and TCP are omitted
+  ns_send_reg(udp_fd, 3, config->net, config->id, "", "");
+
+  // Remove all overlay edges before exiting/leaving.
+  o_rm_all_nb();
+
+  config->net = -1;
+  config->id = -1;
+
+  // Clear routing state.
+  my_node.route_count = 0;
+  my_node.neighbor_count = 0;
+
+  if (verbose) {
+    printf("Successfully left the network and closed all edges.\n");
   }
 }

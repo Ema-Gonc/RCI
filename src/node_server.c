@@ -143,10 +143,10 @@ void ns_handle_response(int udp_fd, const AppConfig *config) {
   buffer[n] = '\0';
 
   if (config && config->monitor) {
-    printf("[MONITOR] Node Server response: %s", buffer);
+    printf("[MONITOR] Node Server response: %s\n", buffer);
     FILE *f = fopen("/tmp/owr_monitor.log", "a");
     if (f) {
-      fprintf(f, "[MONITOR] Node Server response: %s", buffer);
+      fprintf(f, "[MONITOR] Node Server response: %s\n", buffer);
       fclose(f);
     }
   }
@@ -176,6 +176,7 @@ void ns_handle_response(int udp_fd, const AppConfig *config) {
         printf("Unknown REG operation received: %d\n", op);
       }
     }
+
     // Handle NODES responses
     else if (strcmp(command, "NODES") == 0) {
       if (op == 1) {
@@ -202,6 +203,7 @@ void ns_handle_response(int udp_fd, const AppConfig *config) {
         printf("Unknown NODES operation received: %d\n", op);
       }
     }
+
     // Handle CONTACT responses
     else if (strcmp(command, "CONTACT") == 0) {
       if (op == 1) {
@@ -222,6 +224,7 @@ void ns_handle_response(int udp_fd, const AppConfig *config) {
 
         if (o_connect_out(target_ip, target_tcp, target_id, config->id) != 0)
           printf("CONTACT connect failed for node %02d.\n", target_id);
+
       } else if (op == 2) {
         printf("Error: Node is not registered on the Node Server.\n");
       }

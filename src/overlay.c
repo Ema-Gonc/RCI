@@ -46,6 +46,7 @@ extern Node my_node;
 static int find_free_slot(void);
 static int find_slot_by_id(int id);
 static void clear_slot(int slot);
+static int format_node_id(char out[3], int id);
 
 int o_tcp_listener_init(const char *ip, const char *port) {
   struct addrinfo hints, *res;
@@ -198,7 +199,7 @@ void o_init_nb(void) {
 }
 
 void o_add_nb(int id, int fd, const char *ip, const char *tcp) {
-  if (id < 0)
+  if (id < 0 || id > 99)
     return;
 
   int slot = find_slot_by_id(id);
@@ -215,7 +216,11 @@ void o_add_nb(int id, int fd, const char *ip, const char *tcp) {
   if (neighbors[slot].fd != -1 && neighbors[slot].fd != fd)
     close(neighbors[slot].fd);
 
-  sprintf(neighbors[slot].id, "%02d", id);
+  if (format_node_id(neighbors[slot].id, id) != 0) {
+    if (fd != -1)
+      close(fd);
+    return;
+  }
   neighbors[slot].fd = fd;
 
   if (ip) {
@@ -230,7 +235,7 @@ void o_add_nb(int id, int fd, const char *ip, const char *tcp) {
   // Create direct route to this neighbor (cost = 1) before broadcasting
   // This ensures the routing invariant: if neighbor exists, route must exist
   char neighbor_id[64];
-  sprintf(neighbor_id, "%02d", id);
+  snprintf(neighbor_id, sizeof(neighbor_id), "%02d", id);
   add_route(&my_node, neighbor_id, neighbor_id, 1);
   
   // Automatically announce current routing table after establishing an edge.
@@ -265,16 +270,21 @@ void o_read_nb(fd_set *read_fds) {
       if (sscanf(buffer, "%31s", command) >= 1) {
         // NEIGHBOUR id[2]
         if (strcmp(command, "NEIGHBOR") == 0) {
+          
           if (sscanf(buffer, "%*s %d", &id) == 1) {
+            if (id < 0 || id > 99) {
+              continue;
+            }
+
             int existing_slot = find_slot_by_id(id);
             if (existing_slot == -1 || existing_slot == i) {
-              sprintf(neighbors[i].id, "%02d", id);
+              format_node_id(neighbors[i].id, id);
             } else {
               // Duplicate edge to same neighbor: keep current and close redundant one
               // FIX C: Use clear_slot() instead of manual close to ensure proper cleanup
               // and avoid double-close issues
               clear_slot(existing_slot);
-              sprintf(neighbors[i].id, "%02d", id);
+              format_node_id(neighbors[i].id, id);
             }
             // printf("Successfully established edge with Node %02d!\n", id);
           }
@@ -329,7 +339,7 @@ void o_read_nb(fd_set *read_fds) {
 }
 
 void o_rm_nb(int id) {
-  if (id < 0)
+  if (id < 0 || id > 99)
     return;
 
   int slot = find_slot_by_id(id);
@@ -371,7 +381,9 @@ static int find_free_slot(void) {
 
 static int find_slot_by_id(int id) {
   char id_str[3];
-  sprintf(id_str, "%02d", id);
+  if (format_node_id(id_str, id) != 0) {
+    return -1;
+  }
   for (int i = 0; i < MAX_NODES; i++) {
     if (neighbors[i].fd != -1 && strcmp(neighbors[i].id, id_str) == 0) {
       return i;
@@ -401,6 +413,13 @@ static void clear_slot(int slot) {
   memset(neighbors[slot].tcp, 0, sizeof(neighbors[slot].tcp));
 }
 
+static int format_node_id(char out[3], int id) {
+  if (id < 0 || id > 99) {
+    return -1;
+  }
 
-
-//
+  out[0] = (char)('0' + (id / 10));
+  out[1] = (char)('0' + (id % 10));
+  out[2] = '\0';
+  return 0;
+}

@@ -1,6 +1,5 @@
 #include "../include/routing.h"
 #include "../include/common.h"
-#include "../include/net.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,6 +17,10 @@ extern AppConfig config;
 
 // Prototypes
 void check_coordination_end(Node *node, Route *r);
+
+static int send_msg(int fd, const char *msg) {
+    return (int)write(fd, msg, strlen(msg));
+}
 
 // Helper function to log routing messages if monitoring enabled
 static void monitor_log(const char *format, ...) {
@@ -39,11 +42,6 @@ static void monitor_log(const char *format, ...) {
 
     va_end(args);
 }
-
-// Helper function to send message
-// int send_msg(int fd, char *msg) {
-//     return write(fd, msg, strlen(msg));
-// }
 
 // Helper function to find route by dest
 Route *find_route(Node *node, char *dest) {
